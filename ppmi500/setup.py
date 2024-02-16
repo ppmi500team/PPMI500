@@ -14,11 +14,6 @@ setup(
     install_requires=[
         'pandas',
         'boto3',
-    ],
-    entry_points={
-        'console_scripts': [
-            'ppmi500 = ppmi500.main:main',
-        ],
-    },
+    ]
 )
 
