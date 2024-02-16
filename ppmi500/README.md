@@ -17,23 +17,15 @@ Importing ppmi500
 
 ```python
 import ppmi500
+import pandas as pd
+
+# you should have on hand the following files:
+#  ppmi500 ids and dates
+#  antspymm version of images
+#  human qc 
+merged = ppmi500.merge_qc_2_antspymm( ids_date, antspymm_version, human_qc )
+# write it out ....
 ```
-
-## Preprocessing Data
-```python
-from ppmi500 import preprocessing
-```
-
-### Example usage of preprocessing functions
-
-(Add example code here)
-
-## Analyzing Data
-
-```python
-from ppmi500 import analysis
-```
-
 
 ## Documentation
 
