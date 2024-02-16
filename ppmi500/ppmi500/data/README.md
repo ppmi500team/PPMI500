@@ -18,3 +18,6 @@ The NRG formatted filename of the image would then be `<project>-<subject>-<acqu
 Image filepaths are frequently represented in the format `<project>/<subject>/<acquisition-date>/<modality>/<series>/<project>-<subject>-<acquisition-date>-<modality>-<series>`.
 If we want to denote additional processing that was performed on an image, we can concatenate a brief description-tag with the series ID in the NRG image's filename, i.e. for the brain-extracted image with series `100018` we can use `100018_brain_extraction` as the series identifier component of the filename
 (But note: the NRG *directory path* should only include the series identifier itself).
+
+The [antspymm Python module has a function](https://github.com/ANTsX/ANTsPyMM/blob/ba8deebd993b1a314ebe79dabf7e248132f6da8b/antspymm/mm.py#L913) `nrg_format_path()` that can be used to automatically create the NRG filepath.
+Additionally, if you are using [dcm2niix](https://manpages.ubuntu.com/manpages/jammy/en/man1/dcm2niix.1.html), you can provide the `-f` option to format the output filename as NRG. You should use the argument `-f ...` ... (to-do)
