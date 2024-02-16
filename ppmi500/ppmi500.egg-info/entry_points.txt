@@ -1,0 +1,3 @@
+[console_scripts]
+ppmi500 = ppmi500.main:main
+
