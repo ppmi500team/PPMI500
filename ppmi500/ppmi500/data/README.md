@@ -2,7 +2,7 @@
 We can use the `SeriesDescription` field of the DICOM header to identify the modality of the image. The file `modality_map.csv` contains a `Description` column and a `cleaned_modality` column. Any image that has a `SeriesDescription` contained in
 that `Description` field should be labeled with the corresponding modality in the `cleaned_modality` field.
 
-< to-do: summary of how the scientists mapped the `SeriesDescription` column to the `cleaned_modality` >
+**< to-do: summary of how the scientists mapped the `SeriesDescription` column to the `cleaned_modality` >**
 
 
 
