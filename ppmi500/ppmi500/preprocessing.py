@@ -1,9 +1,3 @@
-import pandas as pd
-import boto3
-import json
-from io import StringIO
-
-
 def fill_missing_data_json(df, variable, df_col_name):
     """
     Fill missing data in DataFrame using JSON metadata.
@@ -132,7 +126,7 @@ def pop_missing_data(df, missing_info_df, df_col_name):
     return merged_df
 
 
-def add_qc_data(dir, df):
+def add_qc_data(qc, df):
     """
     Add quality control (QC) data to DataFrame.
 
@@ -144,7 +138,6 @@ def add_qc_data(dir, df):
     Returns:
     pandas.DataFrame: DataFrame with QC data added.
     """
-    qc = pd.read_csv(dir + 'mergedhumanqc_full.csv')
     qc = qc[qc['has_humanqc'].isin(['1', 1])]
     qc.drop_duplicates(inplace=True)
     qc = convert_cols_to_string(qc, ['subjectID','date', 'has_humanqc'])
@@ -175,7 +168,7 @@ def get_metadata_info():
     return metadata
 
 
-def merge_qc_2_antspymm(dir):
+def merge_qc_2_antspymm(ids_df, demo_df, qc):
     """
     Merge quality control (QC) data with demographic data for the PPMI 500 dataset.
 
@@ -189,10 +182,6 @@ def merge_qc_2_antspymm(dir):
     fills missing information for DX, age, sex, and QC data, and returns the merged DataFrame.
 
     """
-    # Load data
-    ids_df = pd.read_csv(dir + 'ppmi500_ids_date.csv')
-    demo_df = pd.read_csv(dir + 'antspymm_v1pt2pt7_PPMI_Curated_Data_Cut_Public_20230612_rev_OR.csv')
-    
     # Filter columns and manipulate data
     demo_df = demo_df[["subjectID", "filename", "age_BL","commonSex","duration_yrs","LEDD","moca",
                     "updrs1_score","updrs2_score","updrs3_score","updrs3_score_on","updrs4_score",
@@ -224,8 +213,9 @@ def merge_qc_2_antspymm(dir):
     merged_df = fill_missing_data(merged_df, metadata, 'joinedDX', 'researchGroup')
 
     # Add QC data
-    merged_df = add_qc_data(dir, merged_df)
+    merged_df = add_qc_data(qc, merged_df)
     merged_df = merged_df.drop_duplicates()
     return merged_df
+
 
 
