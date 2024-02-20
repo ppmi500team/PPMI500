@@ -2,8 +2,7 @@
 We can use the `SeriesDescription` field of the DICOM header to identify the modality of the image (CT, DAT, DTI, DTI_LR, DTI_RL, NM2DMT, PET, SPECT, T1w, T2Flair, rsfMRI, rsfMRI_LR, rsfMRI_RL, or Other). The file `modality_map.csv` contains a `Description` column and a `cleaned_modality` column. Any image that has a `SeriesDescription` contained in
 that `Description` field should be labeled with the corresponding modality in the `cleaned_modality` field.
 
-**< to-do: summary of how the scientists mapped the `SeriesDescription` column to the `cleaned_modality` >**
-
+This modality mapping was created by our MRI scientists, who inferred the `cleaned_modalities` field based on the images' `SeriesDescriptions`.
 
 
 # Converting a Image's Filepath to NRG Format
