@@ -1,3 +1,8 @@
+import json
+import io
+import pandas as pd
+
+
 def fill_missing_data_json(df, variable, df_col_name):
     """
     Fill missing data in DataFrame using JSON metadata.
@@ -161,7 +166,7 @@ def get_metadata_info():
     # Read the CSV file from S3 into a DataFrame
     csv_obj = s3.get_object(Bucket=bucket_name, Key=key)
     csv_content = csv_obj['Body'].read().decode('utf-8')
-    metadata = pd.read_csv(StringIO(csv_content))
+    metadata = pd.read_csv(io.StringIO(csv_content))
     metadata = metadata[['subjectIdentifier', 'researchGroup', 'visitIdentifier', 'subjectAge']]
     metadata.drop_duplicates(inplace=True)
     metadata = metadata[metadata['visitIdentifier'] == 'Baseline']
