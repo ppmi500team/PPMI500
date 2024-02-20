@@ -1,5 +1,5 @@
 # Identifying Modality From Raw DICOM Images
-We can use the `SeriesDescription` field of the DICOM header to identify the modality of the image. The file `modality_map.csv` contains a `Description` column and a `cleaned_modality` column. Any image that has a `SeriesDescription` contained in
+We can use the `SeriesDescription` field of the DICOM header to identify the modality of the image (CT, DAT, DTI, DTI_LR, DTI_RL, NM2DMT, PET, SPECT, T1w, T2Flair, rsfMRI, rsfMRI_LR, rsfMRI_RL, or Other). The file `modality_map.csv` contains a `Description` column and a `cleaned_modality` column. Any image that has a `SeriesDescription` contained in
 that `Description` field should be labeled with the corresponding modality in the `cleaned_modality` field.
 
 **< to-do: summary of how the scientists mapped the `SeriesDescription` column to the `cleaned_modality` >**
@@ -8,11 +8,11 @@ that `Description` field should be labeled with the corresponding modality in th
 
 # Converting a Image's Filepath to NRG Format
 In order to determine the NRG-formatted filepath of an image, we need to know the following fields: 
-- the project name, which is just `PPMI`
+- the project name, which is always just `PPMI`
 - the subject identifier, which we pull out of the XML metadata that is downloaded with the PPMI dataset
 - the acquisition date of the image, which is the `Acq Date` field pulled out of the metadata-records CSV that is downloaded with the PPMI dataset
-- the (cleaned) modality of the image
-- the series identifier of the image
+- the (cleaned) modality of the image, which is pulled from the metadata-records CSV
+- the series identifier of the image, which is pulled from the XML metadata
 
 The NRG formatted filename of the image would then be `<project>-<subject>-<acquisition-date>-<modality>-<series-ID>-<image-filename>`.
 Image filepaths are frequently represented in the format `<project>/<subject>/<acquisition-date>/<modality>/<series>/<project>-<subject>-<acquisition-date>-<modality>-<series-ID>`.
