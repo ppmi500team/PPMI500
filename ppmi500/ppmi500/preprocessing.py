@@ -129,14 +129,15 @@ def pop_missing_data(df, missing_info_df, df_col_name):
 def add_qc_data(qc, df):
     """
     Add quality control (QC) data to DataFrame.
-
-    Parameters:
-    - dir (str) : The directory path where the data files are located.
-    - df (pandas.DataFrame): Input DataFrame.
     
+    Parameters:
+    - qc (pandas.DataFrame): DataFrame containing quality control data.
+    - df (pandas.DataFrame): Input DataFrame.
 
     Returns:
     pandas.DataFrame: DataFrame with QC data added.
+
+    This function takes two DataFrames as input: qc and df. It filters the QC data, converts columns to string type, merges the QC data with the input DataFrame based on subject ID and date, and returns the merged DataFrame with QC data added.
     """
     qc = qc[qc['has_humanqc'].isin(['1', 1])]
     qc.drop_duplicates(inplace=True)
@@ -173,15 +174,14 @@ def merge_qc_2_antspymm(ids_df, demo_df, qc):
     Merge quality control (QC) data with demographic data for the PPMI 500 dataset.
 
     Parameters:
-    - dir (str): The directory path where the data files are located.
+    - ids_df (pandas.DataFrame): DataFrame containing subject IDs and dates.
+    - demo_df (pandas.DataFrame): DataFrame containing demographic data.
+    - qc (pandas.DataFrame): DataFrame containing quality control data.
 
     Returns:
-    - pandas.DataFrame: The merged DataFrame containing demographic and QC data.
-
-    This function loads demographic and QC data files, filters and manipulates columns,
-    fills missing information for DX, age, sex, and QC data, and returns the merged DataFrame.
-
+    pandas.DataFrame: The merged DataFrame containing demographic and QC data.
     """
+    
     # Filter columns and manipulate data
     demo_df = demo_df[["subjectID", "filename", "age_BL","commonSex","duration_yrs","LEDD","moca",
                     "updrs1_score","updrs2_score","updrs3_score","updrs3_score_on","updrs4_score",
