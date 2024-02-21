@@ -1,9 +1,9 @@
 import ppmi500
 import pandas as pd
 
-dir = '/Users/areardon/Desktop/Projects/PPMI_500/ground_truth_dataset/'
+dir = '/Users/areardon/Desktop/Projects/PPMI_500/ground_truth_dataset/Final_data/'
 metadata = pd.read_csv('../data/metadata.csv')
-ids_df = pd.read_csv('../ppmi500_ids_date.csv') 
+ids_df = pd.read_csv('../data/ppmi500_ids_date.csv') 
 antspymm_version = pd.read_csv(dir + 'antspymm_v1pt2pt7_PPMI_Curated_Data_Cut_Public_20230612_rev_OR.csv')
 qc_df = pd.read_csv(dir + 'mergedhumanqc_full.csv')
 

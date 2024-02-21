@@ -1,6 +1,6 @@
 import pandas as pd
 
-def fill_missing_data(df, metadata, df_col_name):
+def pop_missing_data(df, metadata, df_col_name):
     """
     Fill missing data in DataFrame using information from another DataFrame.
 
@@ -16,7 +16,10 @@ def fill_missing_data(df, metadata, df_col_name):
     metadata['subjectID'] = metadata['subjectID'].astype(str)
     filtered_df = metadata[metadata['subjectID'].isin(subid_list)]
     filtered_df = filtered_df[['subjectID', df_col_name]]
-    merged_df = pop_missing_data(df, filtered_df, df_col_name)
+    merged_df = pd.merge(df, filtered_df, how='left', on=['subjectID'], suffixes=('_df1', '_df2'))
+    merged_df[df_col_name + '_df1'].fillna(merged_df[df_col_name + '_df2'], inplace=True)
+    merged_df.rename(columns={df_col_name + '_df1': df_col_name}, inplace=True)
+    merged_df.drop(columns=[df_col_name + '_df2'], inplace=True)
     return merged_df
 
 
@@ -50,25 +53,6 @@ def convert_cols_to_string(df, col_names):
     for col_name in col_names:
         df[col_name] = df[col_name].astype(str)
     return df
-
-
-def pop_missing_data(df, metadata, df_col_name):
-    """
-    Populate missing data in DataFrame using information from another DataFrame.
-
-    Parameters:
-    - df (pandas.DataFrame): Input DataFrame.
-    - missing_info_df (pandas.DataFrame): DataFrame containing missing information.
-    - df_col_name (str): Name of the column in the DataFrame to fill.
-
-    Returns:
-    pandas.DataFrame: DataFrame with missing values filled.
-    """
-    merged_df = pd.merge(df, metadata, how='left', on=['subjectID'], suffixes=('_df1', '_df2'))
-    merged_df[df_col_name + '_df1'].fillna(merged_df[df_col_name + '_df2'], inplace=True)
-    merged_df.rename(columns={df_col_name + '_df1': df_col_name}, inplace=True)
-    merged_df.drop(columns=[df_col_name + '_df2'], inplace=True)
-    return merged_df
 
 
 def add_qc_data(qc, df):
@@ -118,9 +102,9 @@ def merge_qc_2_antspymm(ids_df, metadata, demo_df, qc):
     merged_df = pd.merge(ids_df, demo_df, how="left", on=['subjectID', 'date'])
 
     # Fill missing age and research group data with metadata info
-    merged_df = fill_missing_data(merged_df, metadata, 'age_BL')
-    merged_df = fill_missing_data(merged_df, metadata, 'joinedDX')
-    merged_df = fill_missing_data(merged_df, metadata, 'commonSex')
+    merged_df = pop_missing_data(merged_df, metadata, 'age_BL')
+    merged_df = pop_missing_data(merged_df, metadata, 'joinedDX')
+    merged_df = pop_missing_data(merged_df, metadata, 'commonSex')
 
     # Add QC data
     merged_df = add_qc_data(qc, merged_df)
