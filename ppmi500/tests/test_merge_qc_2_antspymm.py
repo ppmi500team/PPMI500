@@ -1,7 +1,7 @@
 import ppmi500
 import pandas as pd
 
-dir = '' # Fill in dir 
+dir = '' # Fill in local dir with location of antspymm_version and qc_df  
 antspymm_version = pd.read_csv(dir + 'antspymm_v1pt2pt7_PPMI_Curated_Data_Cut_Public_20230612_rev_OR.csv')
 qc_df = pd.read_csv(dir + 'mergedhumanqc_full.csv')
 metadata = pd.read_csv('../ppmi500/data/metadata.csv')
