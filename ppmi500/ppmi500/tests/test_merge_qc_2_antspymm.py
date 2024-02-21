@@ -6,9 +6,7 @@ antspymm_version = pd.read_csv(dir + 'antspymm_v1pt2pt7_PPMI_Curated_Data_Cut_Pu
 qc_df = pd.read_csv(dir + 'mergedhumanqc_full.csv')
 metadata = pd.read_csv('../data/metadata.csv')
 ids_df = pd.read_csv('../data/ppmi500_ids_date.csv') 
-
 df = ppmi500.merge_qc_2_antspymm(ids_df, metadata, antspymm_version, qc_df)
-
 
 
 ## Check for missing data in important columns 
