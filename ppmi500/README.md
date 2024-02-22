@@ -74,5 +74,5 @@ These tests are essential for ensuring the reliability and consistency of the da
 
 All tests should pass without any errors or failures. If a test fails, it indicates potential data integrity issues that need to be addressed. Any discrepancies between the expected and actual values should be investigated and resolved.
 
-The test script (`test_ppmi500_dataset.py`) containing these unit tests is located in the repository under the `tests` directory.
+The test script (`test_merge_qc_2_antspymm.py`) containing these unit tests is located in the repository under the `tests` directory.
 
