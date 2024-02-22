@@ -50,3 +50,29 @@ merged = ppmi500.merge_qc_2_antspymm(ids_date, metadata, antspymm_version, human
 ```python
 help( ppmi500.functionname )
 ```
+
+
+# Test Suite for PPMI 500 Dataset
+
+This test suite contains a set of unit tests designed to verify the integrity and completeness of the PPMI 500 dataset. The tests cover various aspects such as unique subject IDs, missing data, gender counts, diagnostic label counts, modality counts, mean age, and quality control (QC) counts.
+
+## Test Cases
+
+1. **Unique Subject IDs**: Ensures that the number of unique subject IDs matches the expected value of 506.
+2. **Missing Data**: Checks for missing data in critical columns including 'commonSex', 'joinedDX', 'age_BL', 'modality', and 'has_humanqc'. If any missing data is found, the test fails.
+3. **Gender Counts**: Verifies that the counts of male and female subjects match the expected values (305 males, 201 females).
+4. **Diagnostic Label Counts**: Validates the counts of subjects with specific diagnostic labels such as PD (224 expected), Prodromal (235 expected), and CN (48 expected).
+5. **Modality Counts**: Checks the counts of subjects for each imaging modality, including rsfMRI (481 expected), NM2DMT (254 expected), DTI (419 expected), T1w (506 expected), and T2Flair (500 expected).
+6. **Mean Age**: Verifies that the mean age of subjects matches the expected value of 65.8 years.
+7. **Quality Control (QC) Counts**: Ensures that the counts of images passing QC (2642 expected) and failing QC (188 expected) match the expected values.
+
+## Rationale
+
+These tests are essential for ensuring the reliability and consistency of the dataset. They help identify any inconsistencies, missing data, or unexpected patterns that may indicate errors or issues in the dataset processing pipeline.
+
+## Expectations
+
+All tests should pass without any errors or failures. If a test fails, it indicates potential data integrity issues that need to be addressed. Any discrepancies between the expected and actual values should be investigated and resolved.
+
+The test script (`test_ppmi500_dataset.py`) containing these unit tests is located in the repository under the `tests` directory.
+
