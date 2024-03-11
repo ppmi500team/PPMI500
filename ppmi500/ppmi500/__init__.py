@@ -4,6 +4,7 @@ try:
 except:
     pass
 
+from .preprocessing import process_qc_data
 from .preprocessing import pop_missing_data
 from .preprocessing import get_nan_subids
 from .preprocessing import convert_cols_to_string
