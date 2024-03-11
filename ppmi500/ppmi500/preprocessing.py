@@ -13,8 +13,7 @@ def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path):## Descripti
     ## Returns:
     - `df`: Pandas DataFrame. Preprocessed DataFrame containing concatenated and cleaned QC data from all sources.
     """
-
-preprocess_qc_data('data/QC/ppmi500_AR.csv', 'data/QC/ppmi500_LF.csv', 'data/QC/ppmi500_XW.csv', 'data/QC/ppmi500_BA.csv')
+    
     # Read the dataframes
     df_AR = pd.read_csv(df_AR_path)
     df_LF = pd.read_csv(df_LF_path)
