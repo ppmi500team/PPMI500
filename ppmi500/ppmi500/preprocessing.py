@@ -1,6 +1,6 @@
 import pandas as pd
 
-def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path):## Description:
+def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path):
     """
     Processes Quality Control (QC) data from multiple CSV files containing QC information from different sources. It concatenates the data, filters and reorders the columns, converts certain string values to boolean, and removes duplicate rows.
     
