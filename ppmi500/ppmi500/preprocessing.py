@@ -1,5 +1,64 @@
 import pandas as pd
 
+def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path):## Description:
+    """
+    Processes Quality Control (QC) data from multiple CSV files containing QC information from different sources. It concatenates the data, filters and reorders the columns, converts certain string values to boolean, and removes duplicate rows.
+    
+    ## Parameters:
+    - `df_AR_path`: String. File path of the CSV file containing QC data from source 'AR'.
+    - `df_LF_path`: String. File path of the CSV file containing QC data from source 'LF'.
+    - `df_XW_path`: String. File path of the CSV file containing QC data from source 'XW'.
+    - `df_BA_path`: String. File path of the CSV file containing QC data from source 'BA'.
+    
+    ## Returns:
+    - `df`: Pandas DataFrame. Preprocessed DataFrame containing concatenated and cleaned QC data from all sources.
+    """
+
+preprocess_qc_data('data/QC/ppmi500_AR.csv', 'data/QC/ppmi500_LF.csv', 'data/QC/ppmi500_XW.csv', 'data/QC/ppmi500_BA.csv')
+    # Read the dataframes
+    df_AR = pd.read_csv(df_AR_path)
+    df_LF = pd.read_csv(df_LF_path)
+    df_XW = pd.read_csv(df_XW_path)
+    df_BA = pd.read_csv(df_BA_path)
+
+    # Concatenate the dataframes
+    df = pd.concat([df_AR, df_LF, df_XW, df_BA], ignore_index=True)
+
+    # Define the desired column order
+    desired_order = [
+        'subjectID', 'date', 'imageID', 'modality', 'qcfail_orientation', 'qcfail_wrong_modality',
+        'qcfail_phantom', 'qcfail_spacing', 'qcfail_intensity_saturation', 'qcfail_background_noise',
+        'qcfail_motion', 'qcfail_signal_dropout', 'qcfail_temporal_noise', 'qcfail_insufficient_volumes',
+        'qcfail_FOV', 'qcfail_other', 'qchuman_DTI_AR', 'qchuman_FLAIR_XUE', 'qchuman_T1w_XUE',
+        'qchuman_DTI_LF', 'qchuman_rsfMRI_LF', 'qchuman_FLAIR_BA', 'qchuman_T1w_BA', 'qchuman_NM_BA', 'has_humanqc', 'siteKey'
+    ]
+
+    # Filter columns and reorder
+    df = df.filter(regex='^(?!Unnamed)').reindex(columns=desired_order)
+
+    # Define mapping of string values to boolean
+    str_to_bool = {'TRUE': True, 'FALSE': False, 'PASS': True, 'FAIL': False, 'True': True, 'False': False}
+    
+    # Columns to convert from string to boolean
+    cols = ['qchuman_DTI_AR', 'qchuman_FLAIR_XUE', 'qchuman_T1w_XUE', 'qchuman_DTI_LF', 'qchuman_rsfMRI_LF']
+
+    # Function to convert strings to boolean values
+    def convert_to_bool(value):
+        if isinstance(value, str):
+            value = value.strip().upper()  # Remove leading/trailing spaces and convert to uppercase
+            return str_to_bool.get(value, None)
+        return value
+
+    # Convert strings to boolean values
+    for col in cols:
+        df[col] = df[col].apply(convert_to_bool)
+
+    # Remove duplicate rows
+    df.drop_duplicates(inplace=True)
+    return df
+
+
+
 def pop_missing_data(df, metadata, df_col_name):
     """
     Fill missing data in DataFrame using information from another DataFrame.
