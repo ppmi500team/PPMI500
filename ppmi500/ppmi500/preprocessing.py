@@ -1,5 +1,5 @@
 import pandas as pd
-
+import numpy as np
 
 def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path, ids_df_path):
     """
