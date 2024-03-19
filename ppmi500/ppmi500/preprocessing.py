@@ -1,20 +1,103 @@
 import pandas as pd
 
+
 def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path, ids_df_path):
     """
     Processes Quality Control (QC) data from multiple CSV files containing QC information from different sources. It concatenates the data, filters and reorders the columns, converts certain string values to boolean, and removes duplicate rows.
     
-    ## Parameters:
+    Args:
     - df_AR_path: String. File path of the CSV file containing QC data from source 'AR'.
     - df_LF_path: String. File path of the CSV file containing QC data from source 'LF'.
     - df_XW_path: String. File path of the CSV file containing QC data from source 'XW'.
     - df_BA_path: String. File path of the CSV file containing QC data from source 'BA'.
     - ids_df_path: String.  File path of CSV file containing ids data. 
     
-    ## Returns:
+    Returns:
     - df: Pandas DataFrame. Preprocessed DataFrame containing concatenated and cleaned QC data from all sources.
     """
-    def process_qc_data(df_AR_path, df_LF_path, df_XW_path, df_BA_path, ids_df_path):
+    
+    def combine_columns_qc(df, initial1_col_name, initial2_col_name, modality):
+        """
+        Combine columns in a DataFrame related to quality control.
+        
+        Args:
+        df (DataFrame): The input DataFrame containing 'imageID', initial1_col_name, and initial2_col_name columns.
+        initial1_col_name (str): The name of the first initial column.
+        initial2_col_name (str): The name of the second initial column.
+        modality (str): The modality being processed.
+
+        Returns:
+        DataFrame: The processed DataFrame with combined quality control columns.
+        """
+        # Group by 'imageID' and apply logic to determine 'qchuman_DTI' column
+        df_grouped = df.groupby('imageID').agg(
+            **{initial1_col_name: pd.NamedAgg(column=initial1_col_name, aggfunc='first'),
+            initial2_col_name: pd.NamedAgg(column=initial2_col_name, aggfunc='first')}
+        )
+
+        df_grouped['qchuman_' + modality] = None
+        # Step 1: Identify imageIDs where initial1_col is False and initial2_col is True, or vice versa. If they differ, keep the False.
+        mask_diff = (df_grouped[initial1_col_name] != df_grouped[initial2_col_name])
+        df_grouped.loc[mask_diff & (df_grouped[initial1_col_name] == False), 'qchuman_' + modality] = False
+        df_grouped.loc[mask_diff & (df_grouped[initial2_col_name] == False), 'qchuman_' + modality] = False
+
+        # Step 2: For imageIDs where both initial1_col and initial2_col are True, keep only one row.
+        df_grouped.loc[(df_grouped[initial1_col_name] == True) & (df_grouped[initial2_col_name] == True), 'qchuman_' + modality] = True
+
+        # Step 3: For imageIDs where both initial1_col and initial2_col are False, keep only one row.
+        df_grouped.loc[(df_grouped[initial1_col_name] == False) & (df_grouped[initial2_col_name] == False), 'qchuman_' + modality] = False
+
+        # Step 4: For imageIDs where either initial1_col or initial2_col contains a value (either True or False), and the other column contains NaN, keep the row where there is a value (True or False).
+        mask_na = df_grouped[initial1_col_name].isna() ^ df_grouped[initial2_col_name].isna()
+        df_grouped.loc[mask_na & ~df_grouped[initial1_col_name].isna(), 'qchuman_' + modality] = df_grouped[initial1_col_name]
+        df_grouped.loc[mask_na & ~df_grouped[initial2_col_name].isna(), 'qchuman_' + modality] = df_grouped[initial2_col_name]
+
+
+        ## Create fail reason df 
+        filtered_columns = df.filter(like='imageID').columns.tolist() + df.filter(like='qcfail').columns.tolist()
+        df_fail_reason = df[filtered_columns]
+        qcfail_columns = df_fail_reason.filter(like='qcfail').columns
+        mask = df_fail_reason[qcfail_columns].notna().any(axis=1)
+        df_fail_reason = df_fail_reason[mask]
+        df_fail_reason.drop_duplicates(inplace=True)
+        filtered_columns = df_fail_reason.filter(like='imageID').columns.tolist() + df_fail_reason.filter(like='qcfail').columns.tolist()
+        df_fail_reason = df_fail_reason[filtered_columns]
+        
+        duplicate_imageIDs = df_fail_reason[df_fail_reason.duplicated('imageID', keep=False)]
+        duplicate_df = df_fail_reason[df_fail_reason['imageID'].isin(duplicate_imageIDs['imageID'])]
+        duplicate_df = duplicate_df.groupby('imageID').agg(lambda x: True if any(x.dropna()) else None).reset_index()
+
+        not_duplicate_df = df_fail_reason[~df_fail_reason['imageID'].isin(duplicate_imageIDs['imageID'])]
+        fail_df = pd.concat([duplicate_df, not_duplicate_df], ignore_index=True)
+
+
+        # Step 5: Remove duplicate rows based on the imageID
+        df_grouped.reset_index(inplace=True)
+        df_grouped.drop_duplicates(subset='imageID', keep='first', inplace=True)
+        
+        df.drop(columns=[initial1_col_name], inplace=True)
+        df.drop(columns=[initial2_col_name], inplace=True)
+
+        df_grouped.drop(columns=[initial1_col_name], inplace=True)
+        df_grouped.drop(columns=[initial2_col_name], inplace=True)
+        
+        cols_to_drop = df.filter(like='qcfail').columns
+        df.drop(columns=cols_to_drop, inplace=True)
+        
+        # Merge processed DataFrame with original DataFrame based on 'imageID'
+        df['imageID'] = df['imageID'].astype(str)
+        df_grouped['imageID'] = df_grouped['imageID'].astype(str)
+        df = pd.merge(df, df_grouped, on='imageID')
+        df = df.filter(regex='^(?!Unnamed)')
+        df = df.drop_duplicates()
+        df['imageID'] = df['imageID'].astype(str)
+        fail_df['imageID'] = fail_df['imageID'].astype(str)
+        df = pd.merge(df, fail_df,  on='imageID', how = "left")
+        df = df.filter(regex='^(?!Unnamed)')
+        df = df.drop_duplicates()
+        
+        return df
+
     # Read the dataframes
     df_AR = pd.read_csv(df_AR_path)
     df_LF = pd.read_csv(df_LF_path)
@@ -155,6 +238,7 @@ def combine_columns_qc(df, initial1_col_name, initial2_col_name, modality):
     df = df.drop_duplicates()
     
     return df
+
 
 
 
