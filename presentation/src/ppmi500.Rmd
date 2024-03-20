@@ -1,0 +1,1135 @@
+---
+title: "PPMI500 data curation effort"
+author:
+  - Brian B. Avants^1,2^
+  - Lino Becerra^1^
+  - Leon Fonville^2,†^
+  - Olivia Hampton^1,†^
+  - Alexandra Reardon^1,†^
+  - Andrew Stenger^1,†^
+  - Xue Wang^1,†^
+  - Roger Gunn
+affiliation:
+  - "1: Invicro, Boston, MA, FIMXE, USA"
+  - "2: Invicro, FIMXE, UK"
+corresponding_author: "Brian B. Avants (stnava@gmail.com)"
+contributed_equally: "† these authors contributed equally to this work"
+output: html_document
+classoption: table
+urlcolor: blue
+link-citations: true
+---
+
+
+
+```{r ppmimerge0, echo=FALSE,eval=TRUE}
+library(ztable)
+options(ztable.zebra.color="platinum")
+options(ztable.colnames.bold=TRUE)
+options(ztable.include.rownames=FALSE)
+library(moonBook)
+library(plyr)
+library(subtyper)
+library(forcats)
+library(lmerTest)
+library(lme4)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(mclust)
+library(MASS)
+library(dCUR)
+library(mlr3learners)
+library(ANTsR)
+library(mlr3verse)
+
+library(ggplot2)
+```
+
+```{r ppmimerge1, echo=FALSE,eval=TRUE}
+
+#' Calculate Success and Failure Rates by Modality
+#'
+#' This function calculates success and failure rates for a given column in a data frame
+#' based on specified conditions for success and failure. The calculations are grouped by
+#' the 'modality' column.
+#'
+#' @param data A data frame containing the data to be analyzed.
+#' @param column_name The name of the column for which to calculate success and failure rates.
+#' @param success_condition A string representing the condition that defines a success.
+#' @param failure_condition A string representing the condition that defines a failure.
+#'
+#' @return A data frame with success and failure rates calculated for each modality.
+#' @examples
+#' calculate_success_failure_rates(data, "NM_QC_Ratings_Failures", "== 0", "> 0")
+#' calculate_success_failure_rates(data, "NM_QC_Ratings_Z", "== 1", "== 0")
+#'
+#' @export
+calculate_success_failure_rates <- function(data, column_name, success_condition, failure_condition) {
+  # Check if 'data' is a data frame
+  if (!is.data.frame(data)) {
+    stop("The 'data' argument must be a data frame.")
+  }
+  
+  # Check if 'column_name' exists in 'data'
+  if (!column_name %in% names(data)) {
+    stop(paste("Column", column_name, "not found in the data frame."))
+  }
+  
+  # Ensure 'success_condition' and 'failure_condition' are properly formatted strings
+  if (!is.character(success_condition) || !is.character(failure_condition)) {
+    stop("Both 'success_condition' and 'failure_condition' must be character strings.")
+  }
+  
+  # Dynamically construct the expressions for success and failure conditions
+  success_expr <- rlang::parse_expr(paste0(column_name, success_condition))
+  failure_expr <- rlang::parse_expr(paste0(column_name, failure_condition))
+  
+  # Calculate success and failure rates
+  success_failure_data <- data %>%
+    mutate(Success = !!success_expr, 
+           Failure = !!failure_expr) %>%
+    group_by(modality) %>%
+    summarise(Total = n(),
+              Successes = sum(Success, na.rm = TRUE),
+              Failures = sum(Failure, na.rm = TRUE)) %>%
+    mutate(Percent_Success = Successes / Total * 100,
+           Percent_Failure = Failures / Total * 100)
+  
+  success_failure_data$failcat=column_name
+  return(success_failure_data)
+}
+
+
+# Example visualization for categorical data
+plotCategoricalData <- function(  datatoplot, columnName ) {
+  # Convert the frequency table to a data frame for ggplot
+
+  freqDataFrame <- as.data.frame(datatoplot[[columnName]]$FrequencyTable)
+  names(freqDataFrame) <- c("Category", "Frequency")
+  
+  # Add a column to indicate the subject's category
+  freqDataFrame$SubjectCategory <- freqDataFrame$Category == datatoplot[[columnName]]$SubjectCategory
+  
+  # Plot
+  ggplot(freqDataFrame, aes(x = Category, y = Frequency, fill = SubjectCategory)) +
+    geom_bar(stat = "identity", show.legend = FALSE) +
+    scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "lightblue")) +
+    theme_minimal() +
+    labs(title = paste("Dist.", columnName, "/ Subject (red)"),
+         y = "Frequency",
+         x = columnName) +
+    coord_flip()  # Flip for horizontal bars
+}
+
+
+normativeSummary <- function(data, subjectRow, columns, zoom, verbose=TRUE) {
+  if(!is.data.frame(data)) stop("The 'data' input must be a data frame.")
+  if(!all(columns %in% names(data))) stop("All specified columns must exist in the data frame.")
+  if(subjectRow > nrow(data) || subjectRow < 1) stop("Subject row is out of bounds.")
+  
+  if ( ! missing( zoom ) ) {
+    dataz=find_closest_subjects( data[subjectRow,], data, k=zoom, 'commonSex', 'commonAge')
+    data = do.call(rbind, dataz)
+    subjectRow=1
+  }
+
+  summaryList <- list()
+  histList = list()
+  
+  for (col in columns) {
+    columnData <- data[[col]]
+    if ( subtyper::fs(antspymm_vartype(col) %in% c("T1","T2Flair","DTI")) & 'brainVolume' %in% colnames(data)) {
+      columnData=columnData/data$brainVolume
+      if ( verbose ) {
+        print(paste("normalize",col,'by BV'))
+      }
+    }
+    isNumeric <- is.numeric(columnData)
+    if (isNumeric) {
+      # Process numeric data
+      meanVal <- mean(columnData, na.rm = TRUE)
+      sdVal <- (stats::sd(columnData, na.rm = TRUE))
+      subjectScore <- columnData[subjectRow]
+      zScore <- (subjectScore - meanVal) / sdVal
+      if ( verbose ) {
+        print( paste( col, meanVal, sdVal, subjectScore, zScore ) )
+      }
+      if ( !is.na( subjectScore) ) {
+        tTestResult <- t.test(columnData, alternative = "greater", mu = subjectScore)
+      } else tTestResult=list(estimate=NA,p.value=NA,statistic=NA)
+
+      ttl=paste(shorten_pymm_names(col),'sub. (blue) vs pop.')
+      histdf=data.frame( vid=rep("pop",length(columnData)), value=columnData )
+      if ( max( histdf$value,na.rm=T ) < 1 ) {
+        scl=100/(range( histdf$value,na.rm=T )[2]-range( histdf$value,na.rm=T  )[1])
+        histdf$value=histdf$value * scl
+        ttl=paste(ttl,"\n : vals scaled by",insight::format_value(scl))
+      }
+      histdf[subjectRow,'vid']='subject'
+
+      histList[[col]]=gghistogram(histdf, x = 'value',  
+        add.params=list(size=1.25,linetype = "dashed"),
+        add = "mean", add_density = TRUE, title=ttl, fill='vid', legend='none')
+
+      summaryList[[col]] <- list(
+        Mean = meanVal,
+        SD = sdVal,
+        SubjectScore = subjectScore,
+        ZScore = zScore,
+        TTestPValue = tTestResult$p.value
+      )
+    } else {
+      # Process categorical data
+      freqTable <- table(columnData)
+      subjectCategory <- as.character(columnData[subjectRow])
+      
+      summaryList[[col]] <- list(
+        FrequencyTable = freqTable,
+        SubjectCategory = subjectCategory
+      )
+    }
+  }
+  
+  # Assuming 'summaryList' contains the processed data
+  for (col in columns) {
+    if (!is.numeric(data[[col]])) {
+      # Assume 'summaryList' is available from the earlier processing
+      freqTable <- summaryList[[col]]$FrequencyTable
+      subjectCategory <- summaryList[[col]]$SubjectCategory
+      histList[[col]]=plotCategoricalData( summaryList, col)
+    }
+  }
+
+  # Print summary
+
+  # Visualization: For simplicity, focusing on numeric columns for z-score plot
+  numericColumns <- sapply(summaryList, function(x) "ZScore" %in% names(x))
+  if (any(numericColumns)) {
+    zScores <- sapply(summaryList[numericColumns], function(x) x$ZScore)
+    names(zScores) <- names(summaryList)[numericColumns]
+    zScoreDataFrame <- data.frame(Column = names(zScores), ZScore = zScores)
+    zScoreDataFrame$Column = shorten_pymm_names(zScoreDataFrame$Column )
+    if ( verbose )
+      print( zScoreDataFrame )
+    histList[[paste0(col,".z")]]=ggplot(zScoreDataFrame, aes(x = Column, y = ZScore, fill = ZScore)) +
+      geom_bar(stat = "identity") +
+      geom_hline(yintercept = 0, linetype = "dashed") +
+      scale_fill_gradient2(low = succcolor, high = "red", mid = "white", midpoint = 0) +
+      theme_minimal() +
+      labs(title = "Z-Scores vs. pop.",
+           y = "Z-Score",
+           x = "") +
+      coord_flip()
+  } else {
+    cat("No numeric data for z-score plot.\n")
+  }
+
+  grid.arrange(grobs=histList,ncol=round(sqrt(length(histList))),top=paste("Normative Results:",data[subjectRow,'commonID']))
+  return(summaryList)
+}
+```
+
+```{r ppmimerge3, echo=FALSE,eval=FALSE}
+
+
+find_closest_subjects <- function(reference_df, target_df, k, sex_col_name, age_col_name) {
+  # Error checking for column names
+  if(!(sex_col_name %in% names(reference_df)) | !(age_col_name %in% names(reference_df))) {
+    stop("Reference data frame must contain the specified 'sex' and 'age' column names.")
+  }
+  if(!(sex_col_name %in% names(target_df)) | !(age_col_name %in% names(target_df))) {
+    stop("Target data frame must contain the specified 'sex' and 'age' column names.")
+  }
+  if(!is.numeric(k) | k <= 0 | length(k) != 1) {
+    stop("'k' must be a positive integer.")
+  }
+  
+  # Initialize an empty list to store the results
+  results <- list()
+  
+  # Loop through each row in the reference data frame
+  for (i in 1:nrow(reference_df)) {
+    # Extract the current row's sex and age
+    current_sex <- reference_df[[sex_col_name]][i]
+    current_age <- reference_df[[age_col_name]][i]
+    
+    # Filter the target data frame for subjects of the same sex
+    same_sex_df <- target_df[target_df[[sex_col_name]] == current_sex,]
+    
+    # Calculate the absolute difference in age between the reference subject and all target subjects
+    same_sex_df$age_diff <- abs(same_sex_df[[age_col_name]] - current_age)
+    
+    # Sort the data frame by age difference
+    sorted_subjects <- same_sex_df[order(same_sex_df$age_diff), ]
+    
+    # Select the top 'k' closest subjects, handling cases where there are fewer than 'k' subjects
+    num_rows_to_select <- min(nrow(sorted_subjects), k)
+    closest_subjects <- sorted_subjects[1:num_rows_to_select, ]
+    
+    # Store the result
+    results[[i]] <- closest_subjects
+  }
+  
+  # Return the final result
+  return(results)
+}
+
+
+assign_qc_ratings_NM2DMT <- function(df, 
+                              z_coord_col = "NM2DMT_NM_substantianigra_z_coordinate", 
+                              volume_col = "NM2DMT_NM_volume_substantianigra", 
+                              avg_col = "NM2DMT_NM_avg_substantianigra", 
+                              sd_col = "NM2DMT_NM_sd", 
+                              max_col = "NM2DMT_NM_max", 
+                              lohi = c(0.3, 0.7), 
+                              volume_threshold = 500, 
+                              avg_threshold = 2500, 
+                              sd_threshold = 50, 
+                              max_threshold = 5500, verbose=FALSE ) {  
+  df$NM_QC_Ratings_Z <- NA
+  df$NM_QC_Ratings_Z[subtyper::fs(df[[z_coord_col]] > lohi[1] & df[[z_coord_col]] < lohi[2])] <- 1
+  df$NM_QC_Ratings_Z[subtyper::fs(df[[z_coord_col]] <= lohi[1] | df[[z_coord_col]] >= lohi[2])] <- 0
+  df$NM_QC_Ratings_SNVol <- NA
+  df$NM_QC_Ratings_SNVol[subtyper::fs(df[[volume_col]] < volume_threshold)] <- 0
+  df$NM_QC_Ratings_SNVol[subtyper::fs(df[[volume_col]] >= volume_threshold)] <- 1
+  df$NM_QC_Ratings_AvgIntensity <- NA
+  df$NM_QC_Ratings_AvgIntensity[subtyper::fs(df[[avg_col]] <= avg_threshold)] <- 1
+  df$NM_QC_Ratings_AvgIntensity[subtyper::fs(df[[avg_col]] > avg_threshold)] <- 0
+  df$NM_QC_Ratings_SDIntensity <- NA
+  df$NM_QC_Ratings_SDIntensity[subtyper::fs(df[[sd_col]] > sd_threshold)] <- 0
+  df$NM_QC_Ratings_SDIntensity[subtyper::fs(df[[sd_col]] <= sd_threshold)] <- 1
+  df$NM_QC_Ratings_MaxIntensity <- NA
+  df$NM_QC_Ratings_MaxIntensity[subtyper::fs(df[[max_col]] > max_threshold)] <- 0
+  df$NM_QC_Ratings_MaxIntensity[subtyper::fs(df[[max_col]] <= max_threshold)] <- 1
+  
+
+  nmqccols=c("NM_QC_Ratings_Z","NM_QC_Ratings_SNVol","NM_QC_Ratings_AvgIntensity","NM_QC_Ratings_SDIntensity","NM_QC_Ratings_MaxIntensity")
+  df$NM_QC_Ratings_Failures=length(nmqccols)-rowSums( df[,nmqccols], na.rm=T )
+  df$NM_QC_Ratings_Failures[ is.na( df$NM2DMT_NM_max ) ]=NA
+  nmqccols=c(nmqccols,'NM_QC_Ratings_Failures')
+  # Optionally, return tables of ratings and their proportions
+  ratings_table <- table(df$NM_QC_Ratings_Failures)
+  if ( verbose ) {
+    print( ratings_table )
+  }
+  return( df[,nmqccols] )
+  # list(df = df, ratings_table = ratings_table, ratings_proportion = ratings_proportion)
+}
+
+replace_values <- function(vec, old_values, new_values) {
+  # Ensure old_values and new_values are vectors of the same length
+  if (length(old_values) != length(new_values)) {
+    stop("old_values and new_values must have the same length")
+  }
+  
+  # Check for NA in old_values to handle it specifically
+  for (i in seq_along(old_values)) {
+    if (is.na(old_values[i])) {
+      vec[is.na(vec)] <- new_values[i]
+    } else {
+      vec[vec == old_values[i]] <- new_values[i]
+    }
+  }
+  
+  return(vec)
+}
+
+
+```
+
+
+
+```{r normex, echo=FALSE,eval=FALSE}
+slfasym="DTI_mean_md.superior_longitudinal_fasciculus.Asym.jhu_icbm_labels_1mm" 
+rsfvar="rsfMRI_fcnxpro122_SomMotA_2_ContC"
+nmvar='NM2DMT_NM_avg_substantianigra'
+selid='140469_20220615'
+selid='101279_20210620'
+selid='140452_20220503'
+slit = subtyper::fs(ppmi500$T1Hier_resnetGrade > 1.02 & ppmi500[,nmvar] < 1050 )
+ppmi500sel=ppmi500[ slit, ]
+ppmi500sel[,nmvar]=residuals(lm(NM2DMT_NM_avg_substantianigra~NM2DMT_NM_avg_refregion+NM2DMT_NM_count+NM2DMT_NM_evr+NM2DMT_NM_avg_signaltonoise,data=ppmi500sel))
+wrow=303 # low connex
+wrow = which(ppmi500$id == selid )
+# for ( wrow in which( ppmi500sel[,'rsfMRI_fcnxpro122_SomMotA_2_ContC'] < -0.2)  ) {
+xx=normativeSummary( ppmi500sel, wrow, c("commonAge","commonSex", "DXSubAsyn", 
+  "T1Hier_vol_mtg_sn_snc_LRAVGdeep_cit168", 
+  "T1Hier_vol_bn_gp_gpe_LRAVGdeep_cit168", 
+  "T2Flair_flair_wmh_prior", 
+  "T1Hier_vol_bn_str_pu_LRAVGcit168", slfasym, rsfvar, nmvar ) )
+# Sys.sleep(3)
+# }
+
+
+xx=normativeSummary( ppmi500, 487, c("commonAge","commonSex", "T2Flair_flair_wmh_prior", "DXSubAsyn", 
+  "T1Hier_vol_mtg_sn_snc_LRAVGdeep_cit168", 
+  "T1Hier_vol_bn_gp_gpe_LRAVGdeep_cit168", 
+  "T1Hier_vol_bn_str_pu_LRAVGcit168", 
+  "DTI_mean_fa.fornix_.cres..stria_terminalis_.can_not_be_resolved_with_current_resolution..LRAVG.jhu_icbm_labels_1mm"), 
+  zoom=35 )
+
+
+# Example usage
+# rsyncFolder("/path/to/source/folder", "/path/to/destination/folder")
+```
+
+
+```{r ppmiread, echo=FALSE,eval=FALSE}
+if ( ! exists("clin2b") ) {
+  rdir=path.expand('~/code/multidisorder/data/')
+  rdir=path.expand('~/Downloads/ppmi_pym_data/')
+  if ( ! exists("pymf") ) {
+    pymfns = data.frame( 
+      fns=c( 
+        paste0( rdir, 'ppmi_matched_qc_mm_processedCSV_v1.2.7.csv'),
+        paste0( rdir, 'ppmi_matched_qc_mm_processedCSVSRFIRST_v1.2.7.csv'),
+        paste0( rdir, 'ppmi_matched_qc_mm_processedCSVSRNext_v1.2.7.csv')  ),
+      rez=c("OR","SRF","SRP") )
+    print(paste("ANTsPyMM Pipeline : ", myrez ) )
+    pym = read.csv(  pymfns$fn[pymfns$rez == myrez ] )
+    pymf = pym[ , !(colnames(pym) %in% getNamesFromDataframe("u_hier_id", pym))] # junk
+    pymf = filterNAcolumns( pymf, 20 ) # remove columns with > 20% missing
+    pymf[ is.na(pymf$mrimfg), 'mrimfg' ]='Unk'
+    pymf[ is.na(pymf$mrimodel), 'mrimodel' ]='Unk'
+    rm(pym)
+    }
+  if ( ! exists("adni") ) 
+    adni = read.csv( path.expand("~/code/multidisorder/data/adni_gwas/ADNIMERGE_10Feb2024_antspymm_v1.2.7.csv") )
+  studynames=c("ADNI", "NIFD4RTNI", "PPMI","UKBB","A4")
+  dxnames= c("DX_bl", "DX", "DXSub", "DX", "DX" )
+  sexnames=c("PTGENDER","SEX","SEX","sex_f31_0_0","PTGENDER")
+  agenames=c("AGE","Age_BL","age_BL","subjectAge_BL","PTAGE")
+  edunames=c("PTEDUCAT","EDUCATION","EDUCYRS","age_completed_full_time_education_f845_0_0","PTEDUCAT")
+  sidnames=c("PTID","LONI_ID","PATNO","eid","sid")
+  viznames=c("Years.bl","deltaTime","yearsbl","Years.bl","Years.bl")
+  adni$commonSex = adni$PTGENDER
+  adni$commonEdu = adni$PTEDUCAT
+  adni$commonID = adni$subjectID = adni$PTID
+  adni$age_BL = adni$age = adni$AGE
+  adni$yearsbl = adni$Years_bl
+  adni$joinedDX = adni$DX_bl
+  adni$joinedDX[ grep("MCI",adni$joinedDX)]="MCI"
+  adni$joinedDX[ adni$joinedDX == ""]=NA
+  adni$studyName='ADNI'
+  adniasynfn = path.expand( "~/code/multidisorder/data/adni_gwas/AMPRION_ASYN_SAA_13Nov2023.csv")
+  adniasyn = read.csv( adniasynfn )
+  names( adniasyn )[ names(adniasyn) == 'Result' ]='AsynStatus'
+  adniasyn[ subtyper::fs(adniasyn$AsynStatus %in% c('Detected-1','Detected-2')) , 'AsynStatus'] = 'Positive'
+  adniasyn[ subtyper::fs(adniasyn$AsynStatus %in% c('Not_Detected','Indeterminate')), 'AsynStatus' ] = 'Negative'
+  # map 
+  adni$AsynStatus=NA
+  uids = unique( adniasyn$RID[!is.na(adniasyn$AsynStatus)])
+  for ( k in 1:nrow(adniasyn) ) {
+        losel = subtyper::fs( adni$RID == adniasyn$RID[k] )
+        if ( sum(losel) > 0 ) {        
+            adni$AsynStatus[ losel ] = adniasyn$AsynStatus[k]
+        }
+    }
+  demog=read.csv(paste0(rdir,"Demographics_06Feb2024.csv"))
+  curfn=paste0(rdir,'PPMI_Curated_Data_Cut_Public_20230612_rev.csv')
+  saafn = paste0(rdir,'PPMI_CSFSAA_09Oct2023/PPMI_CSFSAA_09Oct2023.csv')
+  if ( ! file.exists( saafn ) ) {
+    saafn = paste0(rdir,'PPMI_CSFSAA_09Oct2023.csv')
+    }
+  saa=read.csv( saafn )
+  ppmidemog0=read.csv( curfn )
+  clin2b = merge_ppmi_imaging_clinical_demographic_data(
+    demog, ppmidemog0, pymf, pymversion=myrez, saa )
+  # add tracker
+  tracker = read.csv(paste0(rdir,"ppmi_2_0_internal_scan_tracking_report_v12-2024-02-08.csv"))
+
+  tracker = tracker[ tracker$Modality == "MR", ]
+  tracker$EVENT_ID=tracker$Visit
+  tracker$EVENT_ID[ grep("Baseline",tracker$EVENT_ID)]="BL"
+  tracker$date=NA
+  momap=data.frame( num=c( paste0("0",1:9), "10", "11", "12") )
+  rownames(momap)=c("JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC")
+  for ( k in 1:nrow(tracker) ) {
+    fixedev=unlist(strsplit( tracker$Visit[k], "/"))
+    if ( length( fixedev ) > 1 ) fixedev=fixedev[length( fixedev )]
+    tracker$EVENT_ID[k]=fixedev
+    fixeddt = unlist(strsplit( tracker$Scan.Date[k],"-"))
+    fixeddt[2] = momap[ fixeddt[2], 'num' ]
+    fixeddt = paste0( fixeddt[3] , fixeddt[2], fixeddt[1] )
+    tracker$date[k]=fixeddt
+    }
+  trackersub = tracker[, c("Subject.ID","date" )]
+  trackersub$imaging_protocol=2
+  names(trackersub)=c("PATNO","date", "imaging_protocol" )
+  clin2b=merge( clin2b, trackersub, by=c("PATNO","date"), all.x=TRUE )
+  clin2b$imaging_protocol[ is.na(clin2b$imaging_protocol) ]=1
+  # add LRRK2 
+  lrrk2 = read.csv( paste0(rdir,'CSFSAA_LRRK2_MRI_SAMPLES_08Jan2024/Data-Table1.csv'))
+  lrrk2$SAAGroup[ lrrk2$SAAGroup == " " ]=NA
+  clin2b$LRRK2_study=NA
+  uids = lrrk2$PATNO
+  lrrk2cols = colnames(lrrk2)
+  lrrk2cols=lrrk2cols[ !(lrrk2cols %in% "PATNO") ]
+  newcols = paste0("LRRK2_", lrrk2cols )
+  clin2b[,newcols]=NA
+  for ( k in 1:length(uids) ) {
+    clin2bsel = clin2b$PATNO == uids[k]
+    if ( sum( clin2bsel ) > 0 ) {
+      # print(paste("have",u))
+      clin2b[clin2bsel,newcols]=lrrk2[k,lrrk2cols]
+    } # else print(paste("miss",u))
+  }
+  clin2b$LRRK2_study = !is.na( clin2b$LRRK2_cohort)
+  summary( lm( LRRK2_MRIPROTOCOL ~ DTI_dti_tsnr_dwi_mean +T1Hier_evratio + noise + snr + msk_vol,data=clin2b) )
+  summary( lm( LRRK2_MRIPROTOCOL ~ DTI_dti_tsnr_b0_mean+DTI_dti_ssnr_b0_mean + DTI_dti_tsnr_dwi_mean+DTI_dti_ssnr_dwi_mean+T1Hier_resnetGrade +T1Hier_evratio + cnr + noise,data=clin2b) )
+  summary( lm( LRRK2_MRIPROTOCOL ~  cnr + noise  + msk_vol + spc0+	spc1+	spc2,data=clin2b) )
+  clin2b$subjectID = as.character(clin2b$subjectID)
+  clin2b$imageID = as.character(clin2b$imageID)
+  clin2b$dtid1 = as.character(clin2b$dtid1)
+  clin2b$dtid2 = as.character(clin2b$dtid2)
+  clin2b$rsfid1 = as.character(clin2b$rsfid1)
+  clin2b$rsfid2 = as.character(clin2b$rsfid2)
+  clin2b=dplyr::bind_rows( clin2b, adni )
+  nna=!is.na( clin2b$AsynStatus )
+  clin2b$DXSubAsyn[nna]=paste0( clin2b$joinedDX[nna], clin2b$AsynStatus[nna] )
+  clin2b$DXSubAsyn[ clin2b$DXSubAsyn == "NANegative"]=NA
+  clin2b$commonEdu[ clin2b$commonEdu == 1] = 12
+  clin2b$commonEdu[ clin2b$commonEdu == 2] = 16
+  clin2b$commonEdu[ clin2b$commonEdu == 3] = 20
+}
+ppmi = clin2b
+ppmi$T1Hier_midbrain_pons_ratio = ppmi$T1Hier_vol_midbrainbrainstem / ppmi$T1Hier_vol_ponsbrainstem
+ppmi$SITE = factor( ppmi$SITE )
+ppmi$brainVolume = ppmi$T1Hier_vol_hemisphere_lefthemispheres + ppmi$T1Hier_vol_hemisphere_righthemispheres
+ppmi$brainVolume = ppmi$brainVolume / mean(ppmi$brainVolume)
+ppmi$imaging_protocol[ ppmi$studyName=='ADNI']=3
+ppmi$imaging_protocol=factor(ppmi$imaging_protocol)
+ppmi[ ppmi$studyName=='ADNI', 'age_BL']=ppmi[ ppmi$studyName=='ADNI', 'AGE']
+
+if ( TRUE ) {
+  temp2=read.csv( '~/Documents/writing/ppmi_mri_scidata/src/data/temp_or.csv')
+  ppmi$u_hier_id=NA
+  for ( k in 1:nrow(ppmi) ) {
+    ppmi$u_hier_id[k]=paste0( ppmi$studyName[k],ppmi$subjectID[k], ppmi$date[k], ppmi$imageID[k], collapse='-') 
+  }
+  ppmi=ppmi[ ppmi$u_hier_id %in% temp2$u_hier_id & ppmi$studyName == 'PPMI', ]
+  temp2 = temp2[ temp2$studyName == 'PPMI', ]
+  if ( myrez == 'SRF' ) {
+    if ( all(ppmi$u_hier_id==temp2$u_hier_id) ) {
+      ppmi$T1Hier_resnetGrade.SR=ppmi$T1Hier_resnetGrade
+      ppmi$T1Hier_resnetGrade=temp2$T1Hier_resnetGrade # set rG to OR rG
+    }
+  }
+  rm(temp2)
+}
+my500=read.csv("/Users/stnava/data/PPMI500/repo/PPMI500/ppmi500/ppmi500/data/ppmi500_ids_date.csv")
+my500$iddate=NA
+for ( k in 1:nrow(my500)) {
+  my500$iddate[k]=paste0(my500$subjectID[k],"_",my500$date[k])
+}
+ppmi$iddate=NA
+for ( k in 1:nrow(ppmi)) {
+  ppmi$iddate[k]=paste0(ppmi$subjectID[k],"_",ppmi$date[k])
+}
+ppmi500=ppmi[ppmi$iddate %in% my500$iddate, ]
+ppmi500$NM_QC_Ratings_BA=assign_qc_ratings_NM2DMT( ppmi500, lohi=c(0.3,0.7), verbose=TRUE )
+write.csv( ppmi500, 'data/ppmi500_idps.csv', row.names=FALSE )
+```
+
+```{r ppmiread500, echo=FALSE,eval=TRUE}
+rdir = path.expand( "~/data/PPMI500/repo/PPMI500/presentation/" )
+if ( ! exists("ppmi500" ) ) {
+  ppmi500=read.csv( paste0( rdir, 'data/ppmi500_idps.csv' ) )
+  ppmi500nmqc=assign_qc_ratings_NM2DMT( ppmi500, lohi = c(0.3, 0.7)  )
+}
+
+```
+
+```{r tblprep,eval=TRUE,echo=FALSE,cache=FALSE}
+###
+toadd = c(  "age_BL", "commonSex", 'race', 'subgroup', 'hy_BL', 'duration_yrs', "updrs_totscore", 'AsynStatus', 'LEDD', 'imaging_protocol')
+toadd = c(  "age_BL", "commonSex", 'subgroup', 'duration_yrs', "updrs_totscore", 'AsynStatus', 'LEDD' )
+toadd = c(  "age_BL", "commonSex", 'duration_yrs', "updrs_totscore", 'AsynStatus', 'LEDD' )
+tblcols = unique( c( toadd, 'joinedDX'  ) )
+bsel = ppmi500$yearsbl==0 # & ppmi$studyName == 'PPMI'
+joinedem=ppmi500[bsel,tblcols]
+joinedem$hasDTI=!is.na(ppmi500[bsel,'DTI_dti_FD_mean'])
+joinedem$hasfMRI=!is.na(ppmi500[bsel,'rsfMRI_fcnxpro129_FD_mean'])
+names(joinedem)[1]=tblcols[1]='age'
+names(joinedem)[2]=tblcols[2]='Sex'
+wsaa=which(names(joinedem)=='AsynStatus' )
+names(joinedem)[wsaa]=tblcols[wsaa]='CSFSAA'
+tblcols=colnames(joinedem)
+tblcols=gsub("_",".",tblcols)
+tblcols=gsub(".mean","",tblcols)
+tblcols=gsub("DTI.","",tblcols)
+tblcols=gsub("rsfMRI.fcnxpro122.","rsfMRI.",tblcols)
+names(joinedem)=tblcols
+# joinedem$race = as.character( joinedem$race )
+# joinedem[ is.na(joinedem$race), 'race' ] = 'not.spec.'
+joinedem$joinedDX = gsub("Prodromal",'AR',joinedem$joinedDX)
+joinedem$joinedDX=as.character(joinedem$joinedDX)
+joinedem$joinedDX[ 
+  multigrep( c("ARSporadic"), joinedem$joinedDX )]='SporadicAR'
+joinedem$joinedDX[ 
+  multigrep( c("ARGBA", "ARLRRK2",  "ARSNCA"), joinedem$joinedDX )]='GenAR'
+joinedem$joinedDX[
+  multigrep( c( "PDPRKN", "PDSNCA"), joinedem$joinedDX )]='OtherGenPD'
+joinedem$joinedDX[ 
+  multigrep( c("PDGBA"), joinedem$joinedDX )]='GBAPD'
+joinedem$joinedDX[
+  multigrep( c("PDLRRK2"), joinedem$joinedDX )]='LRRK2PD'
+joinedem$joinedDX[ 
+  multigrep( c("PDSporadic"), joinedem$joinedDX )]='SporadicPD'
+mlevs = c( "CN", "GenAR", "SporadicAR","OtherGenPD", 'LRRK2PD', 'GBAPD', "SporadicPD")
+joinedem$joinedDX = factor( joinedem$joinedDX, levels = mlevs )
+mytbl = joinedem[ !is.na(joinedem$joinedDX),c(tblcols)]
+rownames(mytbl)=1:nrow(mytbl)
+mycap="Table 1. Baseline cohort for subjects with T1w IDPs and non-missing diagnosis."
+####
+```
+
+# Overview 
+
+We manually curated 500$+$ multiple modality PPMI MRI subjects. 5 messages from this effort.
+
+1. Raw data quality is overall high 
+
+  * visual inspection by humans
+
+2. Processing improves quality/usability further 
+
+  * failure rates humans vs processed
+
+  * we provide scientists handles on this so that can be "strict" or "loose" in data selection
+
+  * we document these parameters 
+
+3. Detailed curation results provide a unique resource in itself
+
+  * for algorithm developers 
+
+    * we ourselves benefit from this (will show examples)
+
+  * for scientists 
+
+    * to have confidence (or at least context regarding quality) in looking at automated IDPs derived from these data
+
+
+4. Enables investigation of the "meaning" of M3RI at the individual level 
+
+5. Empowers investigation of the "meaning" of M3RI at the population level 
+
+
+# the PPMI500 cohort 
+
+  * Reviewing multiple modality data quality for current phase of collection
+
+  * we collaborated on cohort definition
+
+    * first phase - select subjects based on sampling from sites
+
+    * second phase - select subjects based on population characteristics (MJFF/PPMI)
+
+  * show table of summary cohort
+
+```{r clusterCharARtbl,eval=TRUE,echo=FALSE,cache=FALSE,results='asis'}
+turkey = mytbl[,tblcols]
+turkey$joinedDX=as.character(turkey$joinedDX)
+sttblPD=ztable(mytable(joinedDX~.,data=turkey),zebra=2)
+
+# Print the ztable object, ensuring it's treated as LaTeX code
+print(sttblPD, type = "html",size=5,caption=mycap,sidewaystable=TRUE)
+
+
+```
+
+
+```{r tbl1instead,eval=FALSE,echo=FALSE,cache=FALSE,results='asis'}
+library(table1) # https://cran.r-project.org/web/packages/table1/vignettes/table1-latex.pdf
+x=table1(~ . | joinedDX, data=mytbl[!is.na(mytbl$joinedDX),], topclass="Rtable1-zebra",caption=mycap)
+t1kable(x)
+```
+
+
+# 1. Data quality is overall high
+
+##  How do we define M3RI quality? 
+
+* we manually QC'd each modality for each of 500 baseline subjects 
+
+  * characterize reasons for failure 
+
+
+## what is the QC protocol?
+
+* Review QC protocol -- generally speaking 
+
+
+## what are the QC results?
+
+* Summarize QC results for each modality 
+
+  * raw data QC and failure rates
+
+* Summarize results for "joint" quality - how many subjects are high quality across *all modalities at once*?
+
+## Tables of Manual QC results
+
+```{r manqctbl,echo=FALSE,eval=TRUE,results='asis'}
+failcolor='coral1'
+succcolor='darkolivegreen'
+failcolor='firebrick4'
+succcolor='deepskyblue4'#  'dodgerblue1'
+manqc=read.csv(paste0(rdir,'data/mergedhumanqc_full_AR_v0.0.2.csv'))[,-1]
+manqc[manqc=='']=NA
+manqc=manqc[ manqc$has_humanqc==1, ]
+tblcols = colnames(manqc)[ !(colnames(manqc) %in%  c("subjectID","date" ,'id')) ]
+turkey = manqc[,tblcols]
+turkey = turkey[ turkey$modality %in% c("DTIb0","DTIdwi","rsfMRI","rsfMRI_LR","rsfMRI_RL","T1w","T2Flair","unknown"), ]
+
+col2sel = getNamesFromDataframe("qchuman",manqc)
+tct=2
+qclist=list()
+for ( ss in col2sel ) {
+  turkey2=turkey[ !is.na( turkey[,ss] ), ]
+  if ( ss == "qchuman_NM" ) {
+    turkey2=ppmi500nmqc
+    turkey2$modality='Neuromelanin'
+  }
+  if ( nrow(turkey2) > 0 ) {
+    allna=rep(FALSE,ncol(turkey2))
+    for ( k in 1:ncol(turkey2) ) {
+    #  print(colnames(turkey2)[k])
+    #  print(table( is.na(turkey2[,k])))
+      allna[k]=sum( is.na(turkey2[,k]))==nrow(turkey2) 
+    }
+    turkey2=turkey2[,!allna]
+    qclist[[gsub("qchuman_","",ss)]]=turkey2
+    turkey2=turkey2[ , (colnames(turkey2)!='imageID')]
+    mytt=mytable(modality~.,data=turkey2  )
+    qcppmi=ztable(mytt,zebra=2)
+    mycap=paste("Table ", tct, " Patterns of QC results by modality: ", gsub("qchuman_","",ss) )
+    # Print the ztable object, ensuring it's treated as LaTeX code
+    print(qcppmi, type = "html",size=4,caption=mycap,sidewaystable=TRUE)
+    tct=tct+1
+  }
+}
+
+```
+
+
+### NM results 
+
+```{r nmsumm,echo=FALSE,fig.width=6,fig.height=3}
+library(tidyverse)
+data = na.omit(qclist[["NM"]])
+
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "NM_QC_Ratings_Failures", "== 0", "> 0")
+success_failure_data_z = calculate_success_failure_rates(data, "NM_QC_Ratings_Z", "== 1", "== 0")
+
+success_failure_data_vol = calculate_success_failure_rates(data, "NM_QC_Ratings_SNVol", "== 1", "== 0")
+success_failure_data_int = calculate_success_failure_rates(data, "NM_QC_Ratings_AvgIntensity", "== 1", "== 0")
+success_failure_data_sdint = calculate_success_failure_rates(data, "NM_QC_Ratings_SDIntensity", "== 1", "== 0")
+success_failure_data_max = calculate_success_failure_rates(data, "NM_QC_Ratings_MaxIntensity", "== 1", "== 0")
+
+all_fail = rbind( 
+  success_failure_data,
+  success_failure_data_z,
+  success_failure_data_vol,  
+  success_failure_data_int,
+  success_failure_data_sdint,
+  success_failure_data_max )
+
+plot_data <- all_fail %>%
+  select(failcat, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+colnames(plot_data)[1]='NM.QC.cat'
+plot_data$NM.QC.cat=c(
+  "overall","overall",
+  "z.coord","z.coord",
+  'sn.vol','sn.vol',
+  'avg.int','avg.int',
+  'sd.int','sd.int',
+  'max.int','max.int')
+
+plot_data$NM.QC.cat = forcats::fct_relevel( plot_data$NM.QC.cat, 'overall')
+
+# Plot
+ggplot(plot_data, aes(x = NM.QC.cat, y = Percentage, fill = Outcome)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: NM",
+       x = "NM.QC.cat",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top')
+
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+colnames(all_fail)[1]='NM.QC.cat'
+all_fail$NM.QC.cat=c(
+  "overall","z.coord",'sn.vol','avg.int','sd.int','max.int')
+
+all_fail %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('NM QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+
+
+### DT results 
+
+```{r dtsumm,echo=FALSE,fig.width=9,fig.height=4}
+library(tidyverse)
+data = qclist[["DTI"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_DTI=replace_values( data$qchuman_DTI, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:8]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+col2rep='qcfail_other'
+data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+data[,col2rep]=replace_values( data[,col2rep], c(0,'GHOSTING'), c(0,1) )
+table(data[,col2rep])
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_DTI", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:9]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modality)) +
+  geom_bar(stat = "identity", position = "dodge", linewidth = 0.75 ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: DTI",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('DTI QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+### Flair results 
+
+```{r flsumm,echo=FALSE,fig.width=6,fig.height=4}
+library(tidyverse)
+data = qclist[["FLAIR"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_FLAIR=replace_values( data$qchuman_FLAIR, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:7]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_FLAIR", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:7]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome)) +
+  geom_bar(stat = "identity", position = "dodge" ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: FLAIR",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('FLAIR QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+
+### T1w results 
+
+```{r t1summ,echo=FALSE,fig.width=6,fig.height=4}
+library(tidyverse)
+data = qclist[["T1w"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_T1w=replace_values( data$qchuman_T1w, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:5]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_T1w", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:5]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome )) +
+  geom_bar(stat = "identity", position = "dodge" ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: T1w",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('T1w QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+
+### rsfMRI results 
+
+```{r rsfsumm,echo=FALSE,fig.width=9.6,fig.height=4}
+library(tidyverse)
+data = qclist[["rsfMRI"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_rsfMRI=replace_values( data$qchuman_rsfMRI, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:11]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+col2rep='qcfail_other'
+data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+for ( x in unique(data$qcfail_other)[2:5] ) {
+  data[,col2rep]=replace_values( data[,col2rep], c(x,'True'), c(0,1) )
+  }
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_rsfMRI", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:11]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modality)) +
+  geom_bar(stat = "identity", position = "dodge", linewidth = 0.75 ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: rsfMRI",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('rsfMRI QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+
+# 2. Detailed curation results provide a unique resource in itself
+
+## for algorithm developers 
+
+  * we ourselves benefit from this (will show examples)
+
+```{r t1qcvsgrader,echo=FALSE,eval=FALSE}
+temp=qclist[["T1w"]]
+temp2=ppmi500
+temp2=merge(temp2,temp,by='imageID')
+for ( qccol in c("qcfail_background_noise",'qcfail_motion','qcfail_other')) {
+  temp2[ is.na(temp2[,qccol]),qccol]='False'
+}
+mdl = lm( T1Hier_resnetGrade ~ qcfail_background_noise + qcfail_motion + qcfail_other, data=temp2)
+
+failIDsHuman=substr( gsub( 'PPMI', '', temp2$u_hier_id[ temp2$qchuman_T1w!='True' ] ), 0, 6 )
+
+failIDsAuto=substr( gsub( 'PPMI', '', temp2$u_hier_id[ temp2$T1Hier_resnetGrade < 1.02 ] ), 0, 6 )
+
+# table( temp2$T1Hier_resnetGrade >= 1.02, temp2$qchuman_T1w )
+
+```
+
+## for scientists 
+
+  * to have confidence (or at least context regarding quality) in looking at automated IDPs derived from these data
+
+# 3. Processing improves quality/usability further 
+
+## effect of processing by modality 
+
+* for each, summarize how processing improves the data
+
+  * rsfMRI is "easy" to see - throw away motion corrupted data
+
+  * developed methodology specific for PPMI that was informed by this process 
+
+  * automated QC for these modalities for future work
+
+## we provide scientists handles on this so that can be "strict" or "loose" in data selection
+
+
+* we document these parameters 
+
+# 4. Enables investigation of the "meaning" of M3RI at the individual level 
+
+
+```{r gpivol,echo=FALSE,eval=FALSE}
+ppmi500=antspymm_predictors(ppmi500,TRUE)
+zz=ppmi500[ subtyper::fs(ppmi500$DXSubAsyn=='PDSporadicNegative'), ]
+xx=ppmi500[ subtyper::fs(ppmi500$DXSubAsyn=='PDSporadicPositive') , ]
+voi='T1Hier_vol_bn_str_pu_Asymcit168'
+vois=c('T1Hier_vol_bn_gp_gpe_LRAVGcit168',
+  'T1Hier_vol_bn_gp_gpi_LRAVGcit168',
+  'T1Hier_vol_bn_gp_gpi_Asymcit168',
+  'T1Hier_vol_bn_gp_gpe_Asymcit168',
+  'T1Hier_vol_bn_str_pu_LRAVGcit168')
+close_dfs = find_closest_subjects( zz, xx, k=10, 'commonSex', 'commonAge' )
+# vois=c("T1Hier_vol_bn_gp_gpe_LRAVGdeep_cit168")
+for ( voi in vois ) {
+  cat("\n***************************************\n\n")
+  for ( zzminind in 1:nrow(zz)) {
+    reftemp = zz[zzminind,c('commonSex','commonAge','brainVolume')]
+    refvolneg=zz[zzminind,voi]
+    refvolnegbv=zz[zzminind,'brainVolume']
+    temp=close_dfs[[zzminind]]
+    mydiff = temp[,voi]/temp$brainVolume - refvolneg/refvolnegbv
+    mydiff = temp[,voi] - refvolneg
+    mytt = t.test( mydiff )
+    reftemp$voi = voi
+    reftemp$tval=zz[zzminind,'tval']=mytt$statistic
+    reftemp$pval=zz[zzminind,'pval']=mytt$p.value
+    print( reftemp )
+    hist( mydiff, main=voi )
+    Sys.sleep(0.5)
+  }
+  print(voi)
+  print(table( zz$tval > 2 ) )
+}
+summary(lm(  tval ~  commonSex + T1Hier_resnetGrade , data=zz ))
+
+
+xxid=xx$u_hier_id[1]
+mycols = c("commonAge",'commonSex','T1Hier_resnetGrade.SR','AsynStatus',voi,'brainVolume')
+posvsneg=rbind( 
+  zz[,mycols],
+  xx[,mycols]
+)
+posvsneg$normed = posvsneg[,voi]/posvsneg$brainVolume
+temp=ppmi500[subtyper::fs(ppmi500$joinedDX=='PDSporadic'),]
+voi='T1Hier_vol_bn_gp_gpi_LRAVGcit168'
+voi='T1Hier_vol_bn_gp_gpi_LRAVGcit168'
+voisX=c(
+  getNamesFromDataframe( c("T1Hier","_pu","vol",'Asym'),temp),
+  getNamesFromDataframe( c("T1Hier","_gp","vol",'Asym'),temp), 
+  getNamesFromDataframe( c("T1Hier","_pu","vol",'LRAV'),temp),
+  getNamesFromDataframe( c("T1Hier","_gp","vol",'LRAV'),temp) )
+
+voisC=c(
+  getNamesFromDataframe( c("T1Hier","temporal","thk",'Asym'),temp),
+  getNamesFromDataframe( c("T1Hier","temporal","thk",'LRAV'),temp))
+
+vvv=getNamesFromDataframe( c("T1Hier","nbm","thk",'LR'),temp)
+vvv=rowMeans(temp[,vvv],na.rm=T)
+########################################################
+temp$temp = ((temp[,vois])/mean(temp[,vois]))# *(vvv/mean(vvv))
+vois='temp'
+vois='T1Hier_vol_bn_gp_gpe_LRAVGdeep_cit168'
+temp=ppmi500
+for ( voi in vois ) {
+  mdl=lm( paste(voi, "~ DXSubAsyn + commonSex + commonAge "),data=temp)
+#  mdl=lm( paste(voi, "~ AsynStatus + commonSex + commonAge + brainVolume"),data=temp)
+  print(summary(mdl))
+  print(voi)
+  visreg::visreg(mdl,'DXSubAsyn',main=voi)
+}
+########################################################
+```
+
+
+# 5. Empowers investigation of the "meaning" of M3RI at the population level 
