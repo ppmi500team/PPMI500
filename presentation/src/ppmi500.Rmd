@@ -42,11 +42,41 @@ library(dCUR)
 library(mlr3learners)
 library(ANTsR)
 library(mlr3verse)
-
+library(rsq)
 library(ggplot2)
+library(modelsummary)
 ```
 
 ```{r ppmimerge1, echo=FALSE,eval=TRUE}
+
+
+add_vectors_with_na <- function(a, b) {
+  # Check if the vectors are of the same length
+  if(length(a) != length(b)) {
+    stop("The vectors must be of the same length.")
+  }
+  
+  # Initialize the result vector
+  result <- vector("numeric", length(a))
+  
+  # Loop through each element of the vectors
+  for(i in seq_along(a)) {
+    # If both elements are NA, the result is NA
+    if(is.na(a[i]) && is.na(b[i])) {
+      result[i] <- NA
+    # If one of the elements is NA, use the other element
+    } else if(is.na(a[i])) {
+      result[i] <- b[i]
+    } else if(is.na(b[i])) {
+      result[i] <- a[i]
+    # If neither element is NA, sum the elements
+    } else {
+      result[i] <- a[i] + b[i]
+    }
+  }
+  
+  return(result)
+}
 
 #' Calculate Success and Failure Rates by Modality
 #'
@@ -75,7 +105,7 @@ calculate_success_failure_rates <- function(data, column_name, success_condition
   if (!column_name %in% names(data)) {
     stop(paste("Column", column_name, "not found in the data frame."))
   }
-  
+  data=data[ !is.na(data[,column_name]), ]
   # Ensure 'success_condition' and 'failure_condition' are properly formatted strings
   if (!is.character(success_condition) || !is.character(failure_condition)) {
     stop("Both 'success_condition' and 'failure_condition' must be character strings.")
@@ -100,244 +130,7 @@ calculate_success_failure_rates <- function(data, column_name, success_condition
   return(success_failure_data)
 }
 
-
-# Example visualization for categorical data
-plotCategoricalData <- function(  datatoplot, columnName ) {
-  # Convert the frequency table to a data frame for ggplot
-
-  freqDataFrame <- as.data.frame(datatoplot[[columnName]]$FrequencyTable)
-  names(freqDataFrame) <- c("Category", "Frequency")
-  
-  # Add a column to indicate the subject's category
-  freqDataFrame$SubjectCategory <- freqDataFrame$Category == datatoplot[[columnName]]$SubjectCategory
-  
-  # Plot
-  ggplot(freqDataFrame, aes(x = Category, y = Frequency, fill = SubjectCategory)) +
-    geom_bar(stat = "identity", show.legend = FALSE) +
-    scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "lightblue")) +
-    theme_minimal() +
-    labs(title = paste("Dist.", columnName, "/ Subject (red)"),
-         y = "Frequency",
-         x = columnName) +
-    coord_flip()  # Flip for horizontal bars
-}
-
-
-normativeSummary <- function(data, subjectRow, columns, zoom, verbose=TRUE) {
-  if(!is.data.frame(data)) stop("The 'data' input must be a data frame.")
-  if(!all(columns %in% names(data))) stop("All specified columns must exist in the data frame.")
-  if(subjectRow > nrow(data) || subjectRow < 1) stop("Subject row is out of bounds.")
-  
-  if ( ! missing( zoom ) ) {
-    dataz=find_closest_subjects( data[subjectRow,], data, k=zoom, 'commonSex', 'commonAge')
-    data = do.call(rbind, dataz)
-    subjectRow=1
-  }
-
-  summaryList <- list()
-  histList = list()
-  
-  for (col in columns) {
-    columnData <- data[[col]]
-    if ( subtyper::fs(antspymm_vartype(col) %in% c("T1","T2Flair","DTI")) & 'brainVolume' %in% colnames(data)) {
-      columnData=columnData/data$brainVolume
-      if ( verbose ) {
-        print(paste("normalize",col,'by BV'))
-      }
-    }
-    isNumeric <- is.numeric(columnData)
-    if (isNumeric) {
-      # Process numeric data
-      meanVal <- mean(columnData, na.rm = TRUE)
-      sdVal <- (stats::sd(columnData, na.rm = TRUE))
-      subjectScore <- columnData[subjectRow]
-      zScore <- (subjectScore - meanVal) / sdVal
-      if ( verbose ) {
-        print( paste( col, meanVal, sdVal, subjectScore, zScore ) )
-      }
-      if ( !is.na( subjectScore) ) {
-        tTestResult <- t.test(columnData, alternative = "greater", mu = subjectScore)
-      } else tTestResult=list(estimate=NA,p.value=NA,statistic=NA)
-
-      ttl=paste(shorten_pymm_names(col),'sub. (blue) vs pop.')
-      histdf=data.frame( vid=rep("pop",length(columnData)), value=columnData )
-      if ( max( histdf$value,na.rm=T ) < 1 ) {
-        scl=100/(range( histdf$value,na.rm=T )[2]-range( histdf$value,na.rm=T  )[1])
-        histdf$value=histdf$value * scl
-        ttl=paste(ttl,"\n : vals scaled by",insight::format_value(scl))
-      }
-      histdf[subjectRow,'vid']='subject'
-
-      histList[[col]]=gghistogram(histdf, x = 'value',  
-        add.params=list(size=1.25,linetype = "dashed"),
-        add = "mean", add_density = TRUE, title=ttl, fill='vid', legend='none')
-
-      summaryList[[col]] <- list(
-        Mean = meanVal,
-        SD = sdVal,
-        SubjectScore = subjectScore,
-        ZScore = zScore,
-        TTestPValue = tTestResult$p.value
-      )
-    } else {
-      # Process categorical data
-      freqTable <- table(columnData)
-      subjectCategory <- as.character(columnData[subjectRow])
-      
-      summaryList[[col]] <- list(
-        FrequencyTable = freqTable,
-        SubjectCategory = subjectCategory
-      )
-    }
-  }
-  
-  # Assuming 'summaryList' contains the processed data
-  for (col in columns) {
-    if (!is.numeric(data[[col]])) {
-      # Assume 'summaryList' is available from the earlier processing
-      freqTable <- summaryList[[col]]$FrequencyTable
-      subjectCategory <- summaryList[[col]]$SubjectCategory
-      histList[[col]]=plotCategoricalData( summaryList, col)
-    }
-  }
-
-  # Print summary
-
-  # Visualization: For simplicity, focusing on numeric columns for z-score plot
-  numericColumns <- sapply(summaryList, function(x) "ZScore" %in% names(x))
-  if (any(numericColumns)) {
-    zScores <- sapply(summaryList[numericColumns], function(x) x$ZScore)
-    names(zScores) <- names(summaryList)[numericColumns]
-    zScoreDataFrame <- data.frame(Column = names(zScores), ZScore = zScores)
-    zScoreDataFrame$Column = shorten_pymm_names(zScoreDataFrame$Column )
-    if ( verbose )
-      print( zScoreDataFrame )
-    histList[[paste0(col,".z")]]=ggplot(zScoreDataFrame, aes(x = Column, y = ZScore, fill = ZScore)) +
-      geom_bar(stat = "identity") +
-      geom_hline(yintercept = 0, linetype = "dashed") +
-      scale_fill_gradient2(low = succcolor, high = "red", mid = "white", midpoint = 0) +
-      theme_minimal() +
-      labs(title = "Z-Scores vs. pop.",
-           y = "Z-Score",
-           x = "") +
-      coord_flip()
-  } else {
-    cat("No numeric data for z-score plot.\n")
-  }
-
-  grid.arrange(grobs=histList,ncol=round(sqrt(length(histList))),top=paste("Normative Results:",data[subjectRow,'commonID']))
-  return(summaryList)
-}
 ```
-
-```{r ppmimerge3, echo=FALSE,eval=FALSE}
-
-
-find_closest_subjects <- function(reference_df, target_df, k, sex_col_name, age_col_name) {
-  # Error checking for column names
-  if(!(sex_col_name %in% names(reference_df)) | !(age_col_name %in% names(reference_df))) {
-    stop("Reference data frame must contain the specified 'sex' and 'age' column names.")
-  }
-  if(!(sex_col_name %in% names(target_df)) | !(age_col_name %in% names(target_df))) {
-    stop("Target data frame must contain the specified 'sex' and 'age' column names.")
-  }
-  if(!is.numeric(k) | k <= 0 | length(k) != 1) {
-    stop("'k' must be a positive integer.")
-  }
-  
-  # Initialize an empty list to store the results
-  results <- list()
-  
-  # Loop through each row in the reference data frame
-  for (i in 1:nrow(reference_df)) {
-    # Extract the current row's sex and age
-    current_sex <- reference_df[[sex_col_name]][i]
-    current_age <- reference_df[[age_col_name]][i]
-    
-    # Filter the target data frame for subjects of the same sex
-    same_sex_df <- target_df[target_df[[sex_col_name]] == current_sex,]
-    
-    # Calculate the absolute difference in age between the reference subject and all target subjects
-    same_sex_df$age_diff <- abs(same_sex_df[[age_col_name]] - current_age)
-    
-    # Sort the data frame by age difference
-    sorted_subjects <- same_sex_df[order(same_sex_df$age_diff), ]
-    
-    # Select the top 'k' closest subjects, handling cases where there are fewer than 'k' subjects
-    num_rows_to_select <- min(nrow(sorted_subjects), k)
-    closest_subjects <- sorted_subjects[1:num_rows_to_select, ]
-    
-    # Store the result
-    results[[i]] <- closest_subjects
-  }
-  
-  # Return the final result
-  return(results)
-}
-
-
-assign_qc_ratings_NM2DMT <- function(df, 
-                              z_coord_col = "NM2DMT_NM_substantianigra_z_coordinate", 
-                              volume_col = "NM2DMT_NM_volume_substantianigra", 
-                              avg_col = "NM2DMT_NM_avg_substantianigra", 
-                              sd_col = "NM2DMT_NM_sd", 
-                              max_col = "NM2DMT_NM_max", 
-                              lohi = c(0.3, 0.7), 
-                              volume_threshold = 500, 
-                              avg_threshold = 2500, 
-                              sd_threshold = 50, 
-                              max_threshold = 5500, verbose=FALSE ) {  
-  df$NM_QC_Ratings_Z <- NA
-  df$NM_QC_Ratings_Z[subtyper::fs(df[[z_coord_col]] > lohi[1] & df[[z_coord_col]] < lohi[2])] <- 1
-  df$NM_QC_Ratings_Z[subtyper::fs(df[[z_coord_col]] <= lohi[1] | df[[z_coord_col]] >= lohi[2])] <- 0
-  df$NM_QC_Ratings_SNVol <- NA
-  df$NM_QC_Ratings_SNVol[subtyper::fs(df[[volume_col]] < volume_threshold)] <- 0
-  df$NM_QC_Ratings_SNVol[subtyper::fs(df[[volume_col]] >= volume_threshold)] <- 1
-  df$NM_QC_Ratings_AvgIntensity <- NA
-  df$NM_QC_Ratings_AvgIntensity[subtyper::fs(df[[avg_col]] <= avg_threshold)] <- 1
-  df$NM_QC_Ratings_AvgIntensity[subtyper::fs(df[[avg_col]] > avg_threshold)] <- 0
-  df$NM_QC_Ratings_SDIntensity <- NA
-  df$NM_QC_Ratings_SDIntensity[subtyper::fs(df[[sd_col]] > sd_threshold)] <- 0
-  df$NM_QC_Ratings_SDIntensity[subtyper::fs(df[[sd_col]] <= sd_threshold)] <- 1
-  df$NM_QC_Ratings_MaxIntensity <- NA
-  df$NM_QC_Ratings_MaxIntensity[subtyper::fs(df[[max_col]] > max_threshold)] <- 0
-  df$NM_QC_Ratings_MaxIntensity[subtyper::fs(df[[max_col]] <= max_threshold)] <- 1
-  
-
-  nmqccols=c("NM_QC_Ratings_Z","NM_QC_Ratings_SNVol","NM_QC_Ratings_AvgIntensity","NM_QC_Ratings_SDIntensity","NM_QC_Ratings_MaxIntensity")
-  df$NM_QC_Ratings_Failures=length(nmqccols)-rowSums( df[,nmqccols], na.rm=T )
-  df$NM_QC_Ratings_Failures[ is.na( df$NM2DMT_NM_max ) ]=NA
-  nmqccols=c(nmqccols,'NM_QC_Ratings_Failures')
-  # Optionally, return tables of ratings and their proportions
-  ratings_table <- table(df$NM_QC_Ratings_Failures)
-  if ( verbose ) {
-    print( ratings_table )
-  }
-  return( df[,nmqccols] )
-  # list(df = df, ratings_table = ratings_table, ratings_proportion = ratings_proportion)
-}
-
-replace_values <- function(vec, old_values, new_values) {
-  # Ensure old_values and new_values are vectors of the same length
-  if (length(old_values) != length(new_values)) {
-    stop("old_values and new_values must have the same length")
-  }
-  
-  # Check for NA in old_values to handle it specifically
-  for (i in seq_along(old_values)) {
-    if (is.na(old_values[i])) {
-      vec[is.na(vec)] <- new_values[i]
-    } else {
-      vec[vec == old_values[i]] <- new_values[i]
-    }
-  }
-  
-  return(vec)
-}
-
-
-```
-
 
 
 ```{r normex, echo=FALSE,eval=FALSE}
@@ -529,7 +322,6 @@ for ( k in 1:nrow(ppmi)) {
 }
 ppmi500=ppmi[ppmi$iddate %in% my500$iddate, ]
 ppmi500$NM_QC_Ratings_BA=assign_qc_ratings_NM2DMT( ppmi500, lohi=c(0.3,0.7), verbose=TRUE )
-write.csv( ppmi500, 'data/ppmi500_idps.csv', row.names=FALSE )
 ```
 
 ```{r ppmiread500, echo=FALSE,eval=TRUE}
@@ -715,12 +507,244 @@ for ( ss in col2sel ) {
 ```
 
 
+
+
+### T1w results 
+
+```{r t1summ,echo=FALSE,fig.width=6,fig.height=4}
+library(tidyverse)
+data = qclist[["T1w"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_T1w=replace_values( data$qchuman_T1w, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:5]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+qclist[["T1w"]]=data
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_T1w", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:5]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome )) +
+  geom_bar(stat = "identity", position = "dodge" ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: T1w",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('T1w QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+### Flair results 
+
+```{r flsumm,echo=FALSE,fig.width=6,fig.height=4}
+library(tidyverse)
+data = qclist[["FLAIR"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_FLAIR=replace_values( data$qchuman_FLAIR, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:7]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+qclist[["FLAIR"]]=data
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_FLAIR", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:7]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome)) +
+  geom_bar(stat = "identity", position = "dodge" ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: FLAIR",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('FLAIR QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+
+### DT results 
+
+```{r dtsumm,echo=FALSE,fig.width=9,fig.height=4}
+library(tidyverse)
+data = qclist[["DTI"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_DTI=replace_values( data$qchuman_DTI, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:8]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+col2rep='qcfail_other'
+data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+data[,col2rep]=replace_values( data[,col2rep], c(0,'GHOSTING'), c(0,1) )
+qclist[["DTI"]]=data
+# table(data[,col2rep])
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_DTI", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:9]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modality)) +
+  geom_bar(stat = "identity", position = "dodge", linewidth = 0.75 ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: DTI",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('DTI QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
+
+### rsfMRI results 
+
+```{r rsfsumm,echo=FALSE,fig.width=9.6,fig.height=4}
+library(tidyverse)
+data = qclist[["rsfMRI"]]
+data = data[ data$has_humanqc == 1, ]
+data[ is.na( data) ]='False'
+data$qchuman_rsfMRI=replace_values( data$qchuman_rsfMRI, c("False",'True'), c(1,0) )
+cols2rep=colnames(data)[3:11]
+for ( col2rep in cols2rep ) {
+  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+}
+col2rep='qcfail_other'
+data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
+for ( x in unique(data$qcfail_other)[2:5] ) {
+  data[,col2rep]=replace_values( data[,col2rep], c(x,'True'), c(0,1) )
+  }
+qclist[["rsfMRI"]]=data
+# Calculate success and failure rates
+success_failure_data = calculate_success_failure_rates(data, "qchuman_rsfMRI", "== 0", "== 1")
+for ( mycc in c( colnames(data)[3:11]) ) {
+  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+  success_failure_data=rbind(success_failure_data,temp)
+}
+
+plot_data <- success_failure_data %>%
+  select(failcat, modality, Percent_Success, Percent_Failure) %>%
+  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
+    names_to = "Outcome", values_to = "Percentage")
+
+plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
+
+# Plot
+ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modality)) +
+  geom_bar(stat = "identity", position = "dodge", linewidth = 0.75 ) +
+  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
+  theme_minimal() +
+  labs(title = "Success vs. Failure Rates by QC Cat: rsfMRI",
+       x = "Fail.Category",
+       y = "Percentage",
+       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
+# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
+```
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+success_failure_data %>% 
+  knitr::kable("html", booktabs = TRUE, caption=paste('rsfMRI QC summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+
+
 ### NM results 
 
 ```{r nmsumm,echo=FALSE,fig.width=6,fig.height=3}
 library(tidyverse)
 data = na.omit(qclist[["NM"]])
-
 # Calculate success and failure rates
 success_failure_data = calculate_success_failure_rates(data, "NM_QC_Ratings_Failures", "== 0", "> 0")
 success_failure_data_z = calculate_success_failure_rates(data, "NM_QC_Ratings_Z", "== 1", "== 0")
@@ -781,200 +805,48 @@ all_fail %>%
 ```
 
 
-
-
-
-### DT results 
-
-```{r dtsumm,echo=FALSE,fig.width=9,fig.height=4}
-library(tidyverse)
-data = qclist[["DTI"]]
-data = data[ data$has_humanqc == 1, ]
-data[ is.na( data) ]='False'
-data$qchuman_DTI=replace_values( data$qchuman_DTI, c("False",'True'), c(1,0) )
-cols2rep=colnames(data)[3:8]
-for ( col2rep in cols2rep ) {
-  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
-}
-col2rep='qcfail_other'
-data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
-data[,col2rep]=replace_values( data[,col2rep], c(0,'GHOSTING'), c(0,1) )
-table(data[,col2rep])
-# Calculate success and failure rates
-success_failure_data = calculate_success_failure_rates(data, "qchuman_DTI", "== 0", "== 1")
-for ( mycc in c( colnames(data)[3:9]) ) {
-  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
-  success_failure_data=rbind(success_failure_data,temp)
-}
-
-plot_data <- success_failure_data %>%
-  select(failcat, modality, Percent_Success, Percent_Failure) %>%
-  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
-    names_to = "Outcome", values_to = "Percentage")
-
-plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
-
-# Plot
-ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modality)) +
-  geom_bar(stat = "identity", position = "dodge", linewidth = 0.75 ) +
-  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
-  theme_minimal() +
-  labs(title = "Success vs. Failure Rates by QC Cat: DTI",
-       x = "Fail.Category",
-       y = "Percentage",
-       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
-
-# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
-# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
-```
-
-
-```{r,results='asis',echo=FALSE}
-# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
-# Print the ztable object, ensuring it's treated as LaTeX code
-# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
-
-success_failure_data %>% 
-  knitr::kable("html", booktabs = TRUE, caption=paste('DTI QC summary')) %>%
-      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
-
-```
-
-
-
-### Flair results 
-
-```{r flsumm,echo=FALSE,fig.width=6,fig.height=4}
-library(tidyverse)
-data = qclist[["FLAIR"]]
-data = data[ data$has_humanqc == 1, ]
-data[ is.na( data) ]='False'
-data$qchuman_FLAIR=replace_values( data$qchuman_FLAIR, c("False",'True'), c(1,0) )
-cols2rep=colnames(data)[3:7]
-for ( col2rep in cols2rep ) {
-  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
-}
-# Calculate success and failure rates
-success_failure_data = calculate_success_failure_rates(data, "qchuman_FLAIR", "== 0", "== 1")
-for ( mycc in c( colnames(data)[3:7]) ) {
-  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
-  success_failure_data=rbind(success_failure_data,temp)
-}
-
-plot_data <- success_failure_data %>%
-  select(failcat, modality, Percent_Success, Percent_Failure) %>%
-  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
-    names_to = "Outcome", values_to = "Percentage")
-
-plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
-
-# Plot
-ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome)) +
-  geom_bar(stat = "identity", position = "dodge" ) +
-  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
-  theme_minimal() +
-  labs(title = "Success vs. Failure Rates by QC Cat: FLAIR",
-       x = "Fail.Category",
-       y = "Percentage",
-       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
-
-# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
-# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
-```
-
-
-```{r,results='asis',echo=FALSE}
-# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
-# Print the ztable object, ensuring it's treated as LaTeX code
-# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
-
-success_failure_data %>% 
-  knitr::kable("html", booktabs = TRUE, caption=paste('FLAIR QC summary')) %>%
-      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
-
-```
-
-
-
-
-### T1w results 
-
-```{r t1summ,echo=FALSE,fig.width=6,fig.height=4}
-library(tidyverse)
-data = qclist[["T1w"]]
-data = data[ data$has_humanqc == 1, ]
-data[ is.na( data) ]='False'
-data$qchuman_T1w=replace_values( data$qchuman_T1w, c("False",'True'), c(1,0) )
-cols2rep=colnames(data)[3:5]
-for ( col2rep in cols2rep ) {
-  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
-}
-# Calculate success and failure rates
-success_failure_data = calculate_success_failure_rates(data, "qchuman_T1w", "== 0", "== 1")
-for ( mycc in c( colnames(data)[3:5]) ) {
-  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
-  success_failure_data=rbind(success_failure_data,temp)
-}
-
-plot_data <- success_failure_data %>%
-  select(failcat, modality, Percent_Success, Percent_Failure) %>%
-  pivot_longer(cols = c(Percent_Success, Percent_Failure), 
-    names_to = "Outcome", values_to = "Percentage")
-
-plot_data$failcat = forcats::fct_relevel( plot_data$failcat, unique(plot_data$failcat[grep("human",plot_data$failcat)]) )
-
-# Plot
-ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome )) +
-  geom_bar(stat = "identity", position = "dodge" ) +
-  scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
-  theme_minimal() +
-  labs(title = "Success vs. Failure Rates by QC Cat: T1w",
-       x = "Fail.Category",
-       y = "Percentage",
-       fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
-
-# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
-# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
-```
-
-
-```{r,results='asis',echo=FALSE}
-# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
-# Print the ztable object, ensuring it's treated as LaTeX code
-# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
-
-success_failure_data %>% 
-  knitr::kable("html", booktabs = TRUE, caption=paste('T1w QC summary')) %>%
-      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
-
-```
-
-
-
-
-### rsfMRI results 
-
-```{r rsfsumm,echo=FALSE,fig.width=9.6,fig.height=4}
-library(tidyverse)
-data = qclist[["rsfMRI"]]
-data = data[ data$has_humanqc == 1, ]
-data[ is.na( data) ]='False'
-data$qchuman_rsfMRI=replace_values( data$qchuman_rsfMRI, c("False",'True'), c(1,0) )
-cols2rep=colnames(data)[3:11]
-for ( col2rep in cols2rep ) {
-  data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
-}
-col2rep='qcfail_other'
-data[,col2rep]=replace_values( data[,col2rep], c("False",'True'), c(0,1) )
-for ( x in unique(data$qcfail_other)[2:5] ) {
-  data[,col2rep]=replace_values( data[,col2rep], c(x,'True'), c(0,1) )
+```{r mergetqctoppmi500,echo=FALSE,fig.width=9,fig.height=4}
+myMode <- function(x) {
+    ux <- unique(x)
+    ux[which.max(tabulate(match(x, ux)))]
+    }
+mostfreq <- function( x, na.rm=TRUE ) {
+    if ( is.numeric( x ) ) return( mean(x,na.rm=na.rm ) )
+    return( myMode( x ) )
   }
-# Calculate success and failure rates
-success_failure_data = calculate_success_failure_rates(data, "qchuman_rsfMRI", "== 0", "== 1")
-for ( mycc in c( colnames(data)[3:11]) ) {
-  temp = calculate_success_failure_rates(data, mycc, "== 0", "== 1")
+
+qclist[["NM"]]$qchuman_NM=NA
+qclist[["NM"]]$qchuman_NM[ subtyper::fs( qclist[["NM"]]$NM_QC_Ratings_Failures == 0 ) ]=0
+qclist[["NM"]]$qchuman_NM[ subtyper::fs( qclist[["NM"]]$NM_QC_Ratings_Failures > 0 ) ]=1
+temp = merge( ppmi500, qclist[["T1w"]][,c("imageID","qchuman_T1w")], by='imageID', all.x=TRUE)
+temp2=qclist[["FLAIR"]][,c("imageID","qchuman_FLAIR")]
+colnames(temp2)[1]='flairid'
+temp = merge( temp, temp2, by='flairid', all.x=TRUE)
+temp2=qclist[["DTI"]][,c("imageID","qchuman_DTI")]
+temp2=aggregate( qchuman_DTI ~ imageID, temp2, mostfreq ) 
+colnames(temp2)[1]='dtid1'
+temp = merge( temp, temp2, by='dtid1', all.x=TRUE)
+colnames(temp2)[1]='dtid2'
+temp = merge( temp, temp2, by='dtid2', all.x=TRUE)
+temp2=qclist[["rsfMRI"]][,c("imageID","qchuman_rsfMRI")]
+temp2=aggregate( qchuman_rsfMRI ~ imageID, temp2, mostfreq ) 
+colnames(temp2)[1]='rsfid1'
+temp = merge( temp, temp2, by='rsfid1', all.x=TRUE)
+colnames(temp2)[1]='rsfid2'
+temp = merge( temp, temp2, by='rsfid2', all.x=TRUE)
+temp$qchuman_NM=qclist[["NM"]]$qchuman_NM # these were calculated directly from ppmi500
+if ( ! ( all( c("qchuman_T1w","qchuman_NM") %in% colnames(ppmi500))) ) {
+  ppmi500=temp
+}
+
+qchcols=getNamesFromDataframe("qchuman",ppmi500)
+success_failure_data = calculate_success_failure_rates(ppmi500, qchcols[1], "== 0", "== 1")
+for ( mycc in qchcols[-1] ) {
+  temp = calculate_success_failure_rates(ppmi500, mycc, "== 0", "== 1")
   success_failure_data=rbind(success_failure_data,temp)
 }
+success_failure_data$modality=c("T1w",'FLAIR',"DTI","DTI","rsfMRI","rsfMRI","NM")
+
 
 plot_data <- success_failure_data %>%
   select(failcat, modality, Percent_Success, Percent_Failure) %>%
@@ -988,29 +860,100 @@ ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modalit
   geom_bar(stat = "identity", position = "dodge", linewidth = 0.75 ) +
   scale_fill_manual(values = c("Percent_Success" = succcolor, "Percent_Failure" = failcolor)) +
   theme_minimal() +
-  labs(title = "Success vs. Failure Rates by QC Cat: rsfMRI",
+  labs(title = "Success vs. Failure Rates by QC Cat: All",
        x = "Fail.Category",
        y = "Percentage",
        fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
 
-# ggbarplot( plot_data, x='failcat', y='Percentage', color='modality', fill='Outcome' )
-# ggbarplot( plot_data, x='failcat', y='Percentage', facet.by='modality', fill='Outcome' )
-```
-
-
-```{r,results='asis',echo=FALSE}
-# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
-# Print the ztable object, ensuring it's treated as LaTeX code
-# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
-
-success_failure_data %>% 
-  knitr::kable("html", booktabs = TRUE, caption=paste('rsfMRI QC summary')) %>%
-      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+# now write this out 
+# write.csv( ppmi500, 'data/ppmi500_idps.csv', row.names=FALSE )
 
 ```
 
 
+## do a check based on rsfmri motion -- if the qc data "makes sense"
 
+
+```{r fmrimotion,echo=FALSE,eval=TRUE,fig.width=12,fig.height=6}
+
+rsfqc=add_vectors_with_na( as.numeric( ppmi500$qchuman_rsfMRI.x ), as.numeric( ppmi500$qchuman_rsfMRI.y ) )
+
+xcl=c('winz','threshold','original')
+nuisnames = unique( c( 
+  getNamesFromDataframe( c("rsfMRI","122","snr"), ppmi500, exclusions=xcl),
+  getNamesFromDataframe( c("rsfMRI","122","FD"), ppmi500, exclusions=xcl),
+  getNamesFromDataframe( c("rsfMRI","122","minutes"), ppmi500, exclusions=xcl),
+  getNamesFromDataframe( c("rsfMRI","122","despik"), ppmi500, exclusions=xcl ),
+  getNamesFromDataframe( c("rsfMRI","122","evr"), ppmi500, exclusions=xcl)))
+for ( n in nuisnames ) {
+  nn=paste0(n,"_winz")
+  nn=gsub("rsfMRI_fcnxpro122_","",nn)
+  if ( length(grep("minutes",n) > 0 ) ) {
+    ppmi500[,nn]=ppmi500[,n]
+    ppmi500[ subtyper::fs(ppmi500[,nn] > 10) ,nn]=ppmi500[ subtyper::fs(ppmi500[,nn] > 10) ,nn]-5
+  } else ppmi500[,nn]=psych::winsor( ppmi500[,n], 0.01 )
+}
+nuisnames=getNamesFromDataframe("_winz",ppmi500)
+mform = paste( "rsfqc ~ ", paste( nuisnames, collapse='+') )
+mdl=lm(   mform , data=ppmi500)
+mygrobs=visreg::visreg(mdl,gg=TRUE)
+for ( g in 1:length(mygrobs) ) mygrobs[[g]]=mygrobs[[g]]+theme_minimal()+
+    theme(axis.title.x = element_text(size = 14),
+          axis.title.y = element_text(size = 14))
+grid.arrange( grobs=mygrobs, nrow=2, top='QC vs automatic nuisance covariates') 
+
+rsfvar="rsfMRI_fcnxpro122_SomMotA_2_ContC"
+temp=ppmi500
+temp$commonAge=as.numeric(scale(temp$commonAge))
+temp$rsfqc=rsfqc
+temp$cnxvar=temp[,rsfvar]
+mform = paste( "cnxvar ~ 1 +", paste( nuisnames, collapse='+') )
+mdlF=lm(   mform , data=temp)
+mygrobs=visreg::visreg(mdlF,gg=TRUE)
+for ( g in 1:length(mygrobs) ) mygrobs[[g]]=mygrobs[[g]]+theme_minimal()+
+    theme(axis.title.x = element_text(size = 14),
+          axis.title.y = element_text(size = 14))
+grid.arrange( grobs=mygrobs, nrow=2, 
+  top=paste('Connectivity vs nuisance and QC: pass and fail R^2',
+    insight::format_value(rsq(mdlF,adj=T),digits=3)))
+
+mform = paste( "cnxvar ~  ", paste( nuisnames, collapse='+') )
+tempx=temp[temp$rsfqc==0,]
+mdlP=lm(   mform , data=tempx)
+mygrobs=visreg::visreg(mdlP,gg=TRUE)
+for ( g in 1:length(mygrobs) ) mygrobs[[g]]=mygrobs[[g]]+theme_minimal()+
+    theme(axis.title.x = element_text(size = 14),
+          axis.title.y = element_text(size = 14))
+#grid.arrange( grobs=mygrobs, nrow=2, 
+ # top=paste('Connectivity vs nuisance and QC: pass only R^2',insight::format_value(rsq(mdlP,adj=T),digits=3)))
+
+
+mform = paste( "cnxvar ~ joinedDX+commonAge+commonSex+ despiking_count_summary_winz+ssnr_mean_winz+FD_max_winz")
+tempx=temp[temp$FD_max_winz<=1.5,]
+mdlD=lm(   mform , data=tempx)
+tempx=temp[temp$rsfqc==0,]
+mdlD2=lm(   mform , data=tempx)
+mygrobs2=visreg::visreg(mdlD,gg=TRUE)
+for ( g in 1:length(mygrobs2) ) mygrobs2[[g]]=mygrobs2[[g]]+theme_minimal()+
+    theme(axis.title.x = element_text(size = 14),
+          axis.title.y = element_text(size = 14))
+#grid.arrange( grobs=mygrobs2, nrow=2, 
+ # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
+
+
+print( modelplot( list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 ), 
+  conf_level = .95, coef_omit = "nterc|tsnr|despik|FD_mean|evr|LRR")
+  + ggtitle( paste("Models: All vs Pass vs AutoQC+DX + ManQC+DX (select covars)") )
+  +    theme(
+          plot.title = element_text(size = 20),
+          axis.title.x = element_text(size = 18),
+          axis.title.y = element_text(size = 18), 
+          axis.text.x = element_text(size = 15), 
+          axis.text.y = element_text(size = 15)) )
+# summary(mdlF)
+# summary(mdlP)
+
+```
 
 # 2. Detailed curation results provide a unique resource in itself
 
