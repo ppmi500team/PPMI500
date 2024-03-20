@@ -1192,29 +1192,35 @@ print( modelplot( list(  AutoQC=mdlAuto, ManQC=mdlMan ),
 
 ppmi500sel=ppmi500[ !is.na(ppmi500$qchuman_T1w), ]
 nuisnames = c("noise","psnr","ssim","mi","reflection_err","EVR","msk_vol","spc0","spc1","spc2")
-mform=paste0( "T1Hier_vol_mtg_sn_snc_LRAVGcit168~joinedDX+brainVolume+commonAge+commonSex+",paste(nuisnames,collapse='+'))
-ppmi500sel=scale_variables_in_equation(ppmi500sel,mform)
-tempPass=ppmi500sel[ppmi500sel$qchuman_T1w==0,]
-tempAll=ppmi500sel
-tempFail=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 0.5,]
-tempAutoQC=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 0.8,]
-mdlAll=lm(mform,data=tempAll)
-mdlAutoFail=lm(mform,data=tempFail)
-mdlAuto=lm(mform,data=tempAutoQC)
-mdlMan=lm(mform,data=tempPass)
 
-print( modelplot( list(  
-  All=mdlAll, 
-  AutoDetectFail=mdlAutoFail, 
-  AutoQC=mdlAuto, ManQC=mdlMan ), 
-    conf_level = .95, coef_omit = "nterc|evr|LRR|spc")
-    + ggtitle( paste("T1w Models: All vs Permissive vs AutoQC + ManQC \n (select covars shown) SNC volume") )
-    +    theme(
-            plot.title = element_text(size = 20),
-            axis.title.x = element_text(size = 18),
-            axis.title.y = element_text(size = 18), 
-            axis.text.x = element_text(size = 15), 
-            axis.text.y = element_text(size = 15)) )
+vois=c("T1Hier_vol_mtg_sn_snc_LRAVGcit168","T1Hier_thk_LRAVG_superior_parietaldktcortex",
+  "T1Hier_vol_bn_gp_gpe_Asymdeep_cit168",
+  "T1Hier_vol_bn_gp_gpi_Asymdeep_cit168","T1Hier_vol_LRAVG_dg.ca3mtl")
+for ( voi in vois ) {
+  mform=paste0( voi,"~DXSubAsyn+brainVolume+commonAge+commonSex+",paste(nuisnames,collapse='+'))
+  ppmi500sel=scale_variables_in_equation(ppmi500sel,mform)
+  tempPass=ppmi500sel[ppmi500sel$qchuman_T1w==0,]
+  tempAll=ppmi500sel
+  tempFail=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 0.5,]
+  tempAutoQC=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 0.8,]
+  mdlAll=lm(mform,data=tempAll)
+  mdlAutoFail=lm(mform,data=tempFail)
+  mdlAuto=lm(mform,data=tempAutoQC)
+  mdlMan=lm(mform,data=tempPass)
+
+  print( modelplot( list(  
+    NoCuration=mdlAll, 
+    AutoDetectFail=mdlAutoFail, 
+    AutoQC=mdlAuto, ManQC=mdlMan ), 
+      conf_level = .95, coef_omit = "nterc|evr|LRR|spc|brainV")
+      + ggtitle( paste("T1w Models: All vs Permissive vs AutoQC + ManQC \n (select covars shown)", shorten_pymm_names(voi)) )
+      +    theme(
+              plot.title = element_text(size = 20),
+              axis.title.x = element_text(size = 18),
+              axis.title.y = element_text(size = 18), 
+              axis.text.x = element_text(size = 15), 
+              axis.text.y = element_text(size = 15)) )
+  }
 #################
 ```
 
