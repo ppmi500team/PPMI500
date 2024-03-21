@@ -277,5 +277,6 @@ def merge_qc_2_antspymm(ids_df, metadata, demo_df, qc):
 
     # Add QC data
     merged_df = add_qc_data(qc, merged_df)
+    merged_df = merged_df.filter(regex='^(?!Unnamed)')
     merged_df = merged_df.drop_duplicates()
     return merged_df
