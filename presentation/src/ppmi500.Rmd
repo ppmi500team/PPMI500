@@ -820,6 +820,11 @@ mostfreq <- function( x, na.rm=TRUE ) {
     return( myMode( x ) )
   }
 
+qchcols=getNamesFromDataframe("qchuman",ppmi500)
+if ( length(qchcols) > 0  ) {
+  ppmi500=ppmi500[ , !(colnames(ppmi500) %in% qchcols )]
+}
+
 qclist[["NM"]]$qchuman_NM=NA
 qclist[["NM"]]$qchuman_NM[ subtyper::fs( qclist[["NM"]]$NM_QC_Ratings_Failures == 0 ) ]=0
 qclist[["NM"]]$qchuman_NM[ subtyper::fs( qclist[["NM"]]$NM_QC_Ratings_Failures > 0 ) ]=1
@@ -827,31 +832,66 @@ temp = merge( ppmi500, qclist[["T1w"]][,c("imageID","qchuman_T1w")], by='imageID
 temp2=qclist[["FLAIR"]][,c("imageID","qchuman_FLAIR")]
 colnames(temp2)[1]='flairid'
 temp = merge( temp, temp2, by='flairid', all.x=TRUE)
+
+
 temp2=qclist[["DTI"]][,c("imageID","qchuman_DTI")]
+uids = unique( c( temp$dtid1, temp$dtid2 ) )
 temp2$qchuman_DTI=as.numeric(temp2$qchuman_DTI)
-temp2=aggregate( qchuman_DTI ~ imageID, temp2, median ) 
-colnames(temp2)[1]='dtid1'
-temp = merge( temp, temp2, by='dtid1', all.x=TRUE)
-colnames(temp2)[1]='dtid2'
-temp = merge( temp, temp2, by='dtid2', all.x=TRUE)
+# table( uids %in% qclist[["DTI"]]$imageID )
+temp$qchuman_DTI=NA
+for ( u in uids ) {
+  ww = which( temp2$imageID == u )
+  if ( length (ww ) > 0 ) {
+    puthere = which( temp$dtid1 == u )
+    if ( length(puthere) == 0 ) puthere = which( temp$dtid2 == u )
+    if ( is.na( temp$qchuman_DTI[puthere] )) {
+      temp$qchuman_DTI[puthere] = max( temp2[ww,'qchuman_DTI'])
+    } else temp$qchuman_DTI[puthere] = temp$qchuman_DTI[puthere]+max( temp2[ww,'qchuman_DTI'])
+  }
+}
+
 temp2=qclist[["rsfMRI"]][,c("imageID","qchuman_rsfMRI")]
-temp2=aggregate( qchuman_rsfMRI ~ imageID, temp2, mostfreq ) 
-colnames(temp2)[1]='rsfid1'
-temp = merge( temp, temp2, by='rsfid1', all.x=TRUE)
-colnames(temp2)[1]='rsfid2'
-temp = merge( temp, temp2, by='rsfid2', all.x=TRUE)
+uids = unique( c( temp$rsfid1, temp$rsfid2 ) )
+temp2$qchuman_rsfMRI=as.numeric(temp2$qchuman_rsfMRI)
+temp$qchuman_rsfMRI=NA
+for ( u in uids ) {
+  ww = which( temp2$imageID == u )
+  if ( length (ww ) > 0 ) {
+    puthere = which( temp$rsfid1 == u )
+    if ( length(puthere) == 0 ) puthere = which( temp$rsfid2 == u )
+    if ( is.na( temp$qchuman_rsfMRI[puthere] )) {
+      temp$qchuman_rsfMRI[puthere] = max( temp2[ww,'qchuman_rsfMRI'])
+    } else temp$qchuman_rsfMRI[puthere] = temp$qchuman_rsfMRI[puthere]+max( temp2[ww,'qchuman_rsfMRI'])
+  }
+}
+
+
+# temp2=aggregate( qchuman_DTI ~ imageID, temp2, median ) 
+# colnames(temp2)[1]='dtid1'
+# temp = merge( temp, temp2, by='dtid1', all.x=TRUE)
+# colnames(temp2)[1]='dtid2'
+# temp = merge( temp, temp2, by='dtid2', all.x=TRUE)
+#temp2=qclist[["rsfMRI"]][,c("imageID","qchuman_rsfMRI")]
+#temp2=aggregate( qchuman_rsfMRI ~ imageID, temp2, mostfreq ) 
+#colnames(temp2)[1]='rsfid1'
+#temp = merge( temp, temp2, by='rsfid1', all.x=TRUE)
+#colnames(temp2)[1]='rsfid2'
+#temp = merge( temp, temp2, by='rsfid2', all.x=TRUE)
+
+
 temp$qchuman_NM=qclist[["NM"]]$qchuman_NM # these were calculated directly from ppmi500
-if ( ! ( all( c("qchuman_T1w","qchuman_NM") %in% colnames(ppmi500))) ) {
+qchcols=getNamesFromDataframe("qchuman",temp)
+if ( ! ( all( qchcols %in% colnames(ppmi500))) ) {
   ppmi500=temp
 }
 
-qchcols=getNamesFromDataframe("qchuman",ppmi500)
-success_failure_data = calculate_success_failure_rates(ppmi500, qchcols[1], "== 0", "== 1")
+success_failure_data = calculate_success_failure_rates(ppmi500, qchcols[1], "== 0", ">= 1")
 for ( mycc in qchcols[-1] ) {
-  temp = calculate_success_failure_rates(ppmi500, mycc, "== 0", "== 1")
+  temp = calculate_success_failure_rates(ppmi500, mycc, "== 0", ">= 1")
   success_failure_data=rbind(success_failure_data,temp)
 }
-success_failure_data$modality=c("T1w",'FLAIR',"DTI","DTI","rsfMRI","rsfMRI","NM")
+
+success_failure_data$modality=c("T1w",'FLAIR',"DTI","rsfMRI","NM")
 
 
 plot_data <- success_failure_data %>%
@@ -872,7 +912,9 @@ ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modalit
        fill = "Outcome") + theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1))
 
 # now write this out 
-# write.csv( ppmi500, 'data/ppmi500_idps.csv', row.names=FALSE )
+# nnas=rep(0,ncol(ppmi500))
+# for ( k in 1:ncol(ppmi500 )) nnas[k]=sum(is.na(ppmi500[,k]))
+# write.csv( ppmi500[,nnas < 333], 'data/ppmi500_idps.csv', row.names=FALSE )
 
 ```
 
@@ -882,7 +924,7 @@ ggplot(plot_data, aes(x = failcat, y = Percentage, fill = Outcome, color=modalit
 
 ```{r fmrimotion,echo=FALSE,eval=TRUE,fig.width=12,fig.height=6}
 
-ppmi500$rsfqc=add_vectors_with_na( as.numeric( ppmi500$qchuman_rsfMRI.x ), as.numeric( ppmi500$qchuman_rsfMRI.y ) )
+ppmi500$rsfqc= as.numeric( ppmi500$qchuman_rsfMRI )
 slit = subtyper::fs(ppmi500$T1Hier_resnetGrade > 1.02)
 ppmi500sel=ppmi500[ slit & !is.na(ppmi500$rsfqc), ]
 
@@ -946,11 +988,15 @@ for ( g in 1:length(mygrobs2) ) mygrobs2[[g]]=mygrobs2[[g]]+theme_minimal()+
           axis.title.y = element_text(size = 14))
 #grid.arrange( grobs=mygrobs2, nrow=2, 
  # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
+  mlist = list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 )
+  for ( jj in 1:length(mlist)) {
+    nm=names(mlist)[jj]
+    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+  }
 
-
-print( modelplot( list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 ), 
+print( modelplot( mlist, 
   conf_level = .95, coef_omit = "nterc|tsnr|despik|FD_mean|evr|LRR")
-  + ggtitle( paste("rsfMRI Models: All vs Pass vs AutoQC+DX + ManQC+DX (select covars shown)") )
+  + ggtitle( paste("rsfMRI Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown)") )
   +    theme(
           plot.title = element_text(size = 20),
           axis.title.x = element_text(size = 18),
@@ -970,7 +1016,7 @@ print( modelplot( list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD
 
 ```{r dtiqccheck,echo=FALSE,eval=TRUE,fig.width=12,fig.height=6}
 
-ppmi500$dtiqc=add_vectors_with_na( as.numeric( ppmi500$qchuman_DTI.x ), as.numeric( ppmi500$qchuman_DTI.y ) )
+ppmi500$dtiqc=as.numeric( ppmi500$qchuman_DTI )
 slit = subtyper::fs(ppmi500$T1Hier_resnetGrade > 1.02)
 ppmi500sel=ppmi500[ slit & !is.na(ppmi500$dtiqc), ]
 
@@ -1040,9 +1086,13 @@ for ( slfasym in  getNamesFromDataframe( c("DTI","orpus"), ppmi500 ) ) {
             axis.title.y = element_text(size = 14))
   #grid.arrange( grobs=mygrobs2, nrow=2, 
   # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
+  mlist = list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 )
+  for ( jj in 1:length(mlist)) {
+    nm=names(mlist)[jj]
+    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+  }
 
-
-  print( modelplot( list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 ), 
+  print( modelplot( mlist, 
     conf_level = .95, coef_omit = "nterc|snr|LRR|CNP|brainVolume")
     + ggtitle( paste("DTI Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown)",shorten_pymm_names(slfasym)) )
     +    theme(
@@ -1069,7 +1119,14 @@ slit = subtyper::fs(ppmi500$T1Hier_resnetGrade > 1.02)
 ppmi500sel=ppmi500[ slit & !is.na(ppmi500$NM_QC_Ratings_BA), ]
 
 xcl=c('winz','threshold','original','rsfMR','cnxc')
-nuisnames = c("NM2DMT_NM_avg_signaltonoise","NM2DMT_NM_evr","NM2DMT_NM_sd","NM2DMT_NM_substantianigra_z_coordinate")
+nuisnames = c("NM2DMT_NM_avg_signaltonoise","NM2DMT_NM_evr", "NM2DMT_NM_q0pt10", "NM2DMT_NM_q0pt90",
+  "NM2DMT_NM_q0pt05", "NM2DMT_NM_q0pt95",
+  "NM2DMT_NM_sd","NM2DMT_NM_substantianigra_z_coordinate","NM2DMT_NM_count")
+nuisnames = c("NM2DMT_NM_evr", 
+#  "NM2DMT_NM_q0pt10", "NM2DMT_NM_q0pt90", "NM2DMT_NM_q0pt05", "NM2DMT_NM_q0pt95",
+  "NM2DMT_NM_sd","NM2DMT_NM_substantianigra_z_coordinate","NM2DMT_NM_count")
+# nuisnames = c("NM2DMT_NM_substantianigra_z_coordinate","NM2DMT_NM_count")
+nuisnames=c("NM2DMT_NM_max", "NM2DMT_NM_q0pt10", "NM2DMT_NM_q0pt90", "NM2DMT_NM_q0pt05", "NM2DMT_NM_q0pt95","NM2DMT_NM_min","NM2DMT_NM_count","NM2DMT_NM_substantianigra_z_coordinate")
 for ( n in nuisnames ) {
   nn=paste0(n,"_winz")
   nn=gsub("NM2DMT_NM_","nm.",nn)
@@ -1093,7 +1150,10 @@ grid.arrange( grobs=mygrobs, nrow=2, top='QC vs automatic nuisance covariates')
   # top=paste('Connectivity vs nuisance and QC: pass only R^2',insight::format_value(rsq(mdlP,adj=T),digits=3)))
 
 temp=ppmi500sel
-temp$nmvar = temp$NM2DMT_NM_avg_substantianigra - temp$NM2DMT_NM_avg_refregion
+temp$nmvar = ( temp$NM2DMT_NM_avg_substantianigra - temp$NM2DMT_NM_avg_refregion )# /temp$NM2DMT_NM_sd
+temp$nmvar = ( temp$NM2DMT_NM_avg_substantianigra  ) / temp$NM2DMT_NM_sd
+#  ( temp$NM2DMT_NM_q0pt90 - temp$NM2DMT_NM_q0pt10 )
+# temp = temp[ temp$nmvar < 0.75, ]
 temp$commonAge=as.numeric(scale(temp$commonAge))
 mform = paste( "nmvar ~ 1 +", paste( nuisnames, collapse='+') )
 temp=scale_variables_in_equation( temp, mform)
@@ -1119,19 +1179,30 @@ for ( g in 1:length(mygrobs) ) mygrobs[[g]]=mygrobs[[g]]+theme_minimal()+
       theme(axis.title.x = element_text(size = 14),
             axis.title.y = element_text(size = 14))
 
-mform = paste( "nmvar ~ joinedDX+commonAge+commonSex+brainVolume+", paste( nuisnames, collapse='+'))
-tempx=temp[tempx$nm.sd_winz < 1,]
+
+nuisnames2=nuisnames[-grep("sd",nuisnames)]
+dxsel=c("CNNegative","PDSporadicPositive","ProdromalSporadicPositive")
+mform = paste( "nmvar ~ DXSubAsyn+commonAge+commonSex+brainVolume+", paste( nuisnames, collapse='+'))
+tempx=temp[temp$NM2DMT_NM_sd < 27.5 & temp$NM2DMT_NM_sd > 17.5 & temp$DXSubAsyn %in% dxsel,]
 tempx=scale_variables_in_equation( tempx, mform)
 mdlD=lm(   mform , data=tempx)
-tempx=temp[temp$NM_QC_Ratings_BA==1,]
+tempx=temp[temp$NM_QC_Ratings_BA==1& temp$DXSubAsyn %in% dxsel,]
 tempx=scale_variables_in_equation( tempx, mform)
 mdlD2=lm(   mform , data=tempx)
+
+
+print( jtools::effect_plot( mdlD,'DXSubAsyn' ) +theme(legend.position='top',axis.text.x = element_text(angle = 45, hjust = 1)) )
+cat("\n\n\n\n\n\n")
 #grid.arrange( grobs=mygrobs2, nrow=2, 
 # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
-
-print( modelplot( list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 ), 
-    conf_level = .95, coef_omit = "nterc|snr|LRR|CNP|brainVolume")
-    + ggtitle( paste("DTI Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown)",shorten_pymm_names(slfasym)) )
+mlist=list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 )
+for ( jj in 1:length(mlist)) {
+    nm=names(mlist)[jj]
+    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+  }
+print( modelplot( mlist, 
+    conf_level = .95, coef_omit = "nterc|snr|LRR|CNP|brainVolume|sd|q0|max|min")
+    + ggtitle( paste("NM models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown)") )
     +    theme(
             plot.title = element_text(size = 20),
             axis.title.x = element_text(size = 18),
@@ -1139,8 +1210,11 @@ print( modelplot( list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD
             axis.text.x = element_text(size = 15), 
             axis.text.y = element_text(size = 15)) )
 
-  # summary(mdlF)
+
+
+# summary(mdlF)
 # summary(mdlP)
+
 
 ```
 
@@ -1166,8 +1240,12 @@ tempPass=ppmi500sel[ppmi500sel$qchuman_FLAIR==0,]
 tempFail=ppmi500sel[,]
 mdlMan=lm(mform,data=tempPass)
 mdlAuto=lm(mform,data=tempFail)
-
-print( modelplot( list(  AutoQC=mdlAuto, ManQC=mdlMan ), 
+mlist = list(  AutoQC=mdlAuto, ManQC=mdlMan )
+for ( jj in 1:length(mlist)) {
+    nm=names(mlist)[jj]
+    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+  }
+print( modelplot( mlist, 
     conf_level = .95, coef_omit = "nterc|evr|LRR|brainV")
     + ggtitle( paste("DTI Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown) WM hyperintensity") )
     +    theme(
@@ -1193,26 +1271,30 @@ print( modelplot( list(  AutoQC=mdlAuto, ManQC=mdlMan ),
 ppmi500sel=ppmi500[ !is.na(ppmi500$qchuman_T1w), ]
 nuisnames = c("noise","psnr","ssim","mi","reflection_err","EVR","msk_vol","spc0","spc1","spc2")
 
-vois=c("T1Hier_vol_mtg_sn_snc_LRAVGcit168","T1Hier_thk_LRAVG_superior_parietaldktcortex",
-  "T1Hier_vol_bn_gp_gpe_Asymdeep_cit168",
-  "T1Hier_vol_bn_gp_gpi_Asymdeep_cit168","T1Hier_vol_LRAVG_dg.ca3mtl")
+vois=c("T1Hier_vol_mtg_sn_snc_LRAVGcit168",
+  "T1Hier_vol_bn_str_pu_Asymdeep_cit168",
+  "T1Hier_vol_bn_gp_gpe_LRAVGdeep_cit168","T1Hier_vol_LRAVG_dg.ca3mtl")
 for ( voi in vois ) {
   mform=paste0( voi,"~DXSubAsyn+brainVolume+commonAge+commonSex+",paste(nuisnames,collapse='+'))
   ppmi500sel=scale_variables_in_equation(ppmi500sel,mform)
   tempPass=ppmi500sel[ppmi500sel$qchuman_T1w==0,]
   tempAll=ppmi500sel
   tempFail=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 0.5,]
-  tempAutoQC=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 0.8,]
+  tempAutoQC=ppmi500sel[ppmi500sel$T1Hier_resnetGrade > 1.05,]
   mdlAll=lm(mform,data=tempAll)
   mdlAutoFail=lm(mform,data=tempFail)
   mdlAuto=lm(mform,data=tempAutoQC)
   mdlMan=lm(mform,data=tempPass)
-
-  print( modelplot( list(  
+  mlist = list(  
     NoCuration=mdlAll, 
     AutoDetectFail=mdlAutoFail, 
-    AutoQC=mdlAuto, ManQC=mdlMan ), 
-      conf_level = .95, coef_omit = "nterc|evr|LRR|spc|brainV")
+    AutoQC=mdlAuto, ManQC=mdlMan )
+  for ( jj in 1:length(mlist)) {
+    nm=names(mlist)[jj]
+    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+  }
+  print( modelplot( mlist, 
+      conf_level = .95, coef_omit = "nterc|evr|LRR|spc|brainV|CNP")
       + ggtitle( paste("T1w Models: All vs Permissive vs AutoQC + ManQC \n (select covars shown)", shorten_pymm_names(voi)) )
       +    theme(
               plot.title = element_text(size = 20),
