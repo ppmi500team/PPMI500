@@ -1458,7 +1458,7 @@ for ( voi in vois ) {
 
 ## simlr
 
-```{r simlr,echo=FALSE,eval=TRUE,fig.width=9,fig.height=3}
+```{r simlr,echo=FALSE,eval=TRUE,fig.width=9,fig.height=3,cache=TRUE}
 ######
 ppmi500$allpass=subtyper::fs(
   ppmi500$qchuman_T1w==0 & ppmi500$qchuman_DTI ==0 & ppmi500$qchuman_rsfMRI==0)
@@ -1529,7 +1529,7 @@ dosimlrMH = function( blaster,  energy='reg', nsimlr=5, myseed=3, connect_cog=TR
   nms = names(mats)
   regs0 = list()
   for ( x in 1:length(mats)) {
-#      mats[[x]]=residuals( lm( data.matrix(mats[[x]]) ~ 1, data=blaster2[allnna,]))
+      mats[[x]]=residuals( lm( data.matrix(mats[[x]]) ~ commonSex, data=blaster2[allnna,]))
       mats[[x]]=data.matrix(mats[[x]])
       mycor = cor( mats[[x]] )
       mycor[mycor < 0.8]=0
@@ -1553,7 +1553,7 @@ dosimlrMH = function( blaster,  energy='reg', nsimlr=5, myseed=3, connect_cog=TR
     }
   ########### zzz ############
   myjr = T
-  prescaling = c( 'robust', 'np' )
+  prescaling = c( 'center', 'np' )
   optimus = 'lineSearch'
   maxits = 100
   ebber = 0.99
@@ -1648,13 +1648,14 @@ cogs=getNamesFromDataframe( 'updrs', ppmi500, exclusions=c('4','BL','delta'))
 nsm=length(cogs)
 nsm=2
 permdf=data.frame()
-for ( permxpt in 0:20 ) {
+maxperm=10
+for ( permxpt in 0:maxperm ) {
   if ( permxpt == 0 ) {
     doperm=FALSE
     permstate='original'
   } else {
     doperm=TRUE
-    permstate=paste('perm',permxpt)
+    permstate=paste('perm')
   }
   meeko = dosimlrMH( ppmi500, nsimlr=nsm, energy='cca', connect_cog=T, doAsym=T, 
     restrictDFN=F, doperm=doperm )
@@ -1690,9 +1691,10 @@ for ( permxpt in 0:20 ) {
     summary(mdl2)
     print( paste( nums, myanv0$Pr[2] ) )
     myco=coefficients(summary(mdl1))
-    visreg::visreg( mdl1, simsub[1] , main=paste('T1', permstate,insight::format_p(myco['t1PC1','Pr(>|t|)'])) )
-    visreg::visreg( mdl1, simsub[2] , main=paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])) )
-    visreg::visreg( mdl1, simsub[3], main=paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])) )
+    gg1=visreg::visreg( mdl1, simsub[1], gg=TRUE ) + theme_minimal() + ggtitle(paste('T1', permstate,insight::format_p(myco['t1PC1','Pr(>|t|)'])))
+    gg2=visreg::visreg( mdl1, simsub[2] , main=paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])), gg=TRUE  ) + theme_minimal() + ggtitle(paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])))
+    gg3=visreg::visreg( mdl1, simsub[3], main=paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])), gg=TRUE  ) + theme_minimal() + ggtitle(paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])))
+    grid.arrange(grobs=list(gg1,gg2,gg3),nrow=1)
     nn=nrow(permdf)+1
     permdf[nn,'permstate']=permstate
     permdf[nn,'anv']=myanv0$Pr[2]
@@ -1702,4 +1704,24 @@ for ( permxpt in 0:20 ) {
     }
 }
 #################
+```
+
+
+
+
+
+```{r,results='asis',echo=FALSE}
+# temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
+# Print the ztable object, ensuring it's treated as LaTeX code
+# print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
+
+permdf %>% 
+   knitr::kable("html", booktabs = TRUE, caption=paste('SiMLR permutation summary')) %>%
+      kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
+```
+
+```{r,echo=FALSE}
+permdf$logp = log( permdf$anv )
+gghistogram( permdf, x = 'logp',
+      add = "mean", add_density = TRUE, title='SiMLR original data projection vs permuted projections: model significance', fill='permstate', legend='none')
 ```
