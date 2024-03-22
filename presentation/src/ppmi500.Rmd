@@ -140,21 +140,31 @@ nmvar='NM2DMT_NM_avg_substantianigra'
 nmvar2='NM2DMT_NM_avg_refregion'
 selid='140469_20220615'
 selid='101279_20210620'
-selid='140452_20220503'
+
 ppmi500=antspymm_predictors(ppmi500,TRUE)
-slit = subtyper::fs(ppmi500$T1Hier_resnetGrade > 1.02 & ppmi500[,nmvar] < 1050 )
+slit = subtyper::fs(ppmi500$T1Hier_resnetGrade > 1.05 )#  & ppmi500[,nmvar] < 1050 )
 ppmi500sel=ppmi500[ slit, ]
 ppmi500sel[,nmvar]=ppmi500sel[,nmvar]-ppmi500sel[,nmvar2]
 # residuals(lm(NM2DMT_NM_avg_substantianigra~NM2DMT_NM_avg_refregion+NM2DMT_NM_count+NM2DMT_NM_evr+NM2DMT_NM_avg_signaltonoise,data=ppmi500sel))
 wrow=303 # low connex
+selid='101279_20210620' # maybe pd+
+selid='140469_20220615' # no 
+selid='188666_20230131' # yes pd-
+# selid='140452_20220503' # yes pd+
+multivars=c("commonAge", "DXSubAsyn", 
+    "T1Hier_vol_mtg_sn_snc_LRAVGcit168", 
+    "T1Hier_vol_bn_gp_gpe_LRAVGcit168", 
+#    "T2Flair_flair_wmh_prior", 
+    "T1Hier_vol_bn_str_pu_LRAVGcit168", slfasym, rsfvar, 'updrs_totscore' ) 
+haveall=rep(TRUE,nrow(ppmi500))
+for ( x in multivars ) { 
+  haveall=haveall & !is.na( ppmi500[,x])
+}
+ppmi500$haveall=haveall
+#####################################
 wrow = which(ppmi500sel$id == selid )
 # for ( wrow in which( ppmi500sel[,'rsfMRI_fcnxpro122_SomMotA_2_ContC'] < -0.2)  ) {
-xx=normativeSummary( ppmi500sel, wrow, 
-  c("commonAge", "DXSubAsyn", 
-    "T1Hier_vol_mtg_sn_snc_LRAVGdeep_cit168", 
-    "T1Hier_vol_bn_gp_gpe_LRAVGdeep_cit168", 
-    "T2Flair_flair_wmh_prior", 
-    "T1Hier_vol_bn_str_pu_LRAVGcit168", slfasym, rsfvar, nmvar, 'updrs_totscore' ) )
+xx=normativeSummary( ppmi500sel, wrow, mulitvars)
 # Sys.sleep(3)
 # }
 
@@ -989,9 +999,11 @@ for ( g in 1:length(mygrobs2) ) mygrobs2[[g]]=mygrobs2[[g]]+theme_minimal()+
 #grid.arrange( grobs=mygrobs2, nrow=2, 
  # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
   mlist = list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 )
+  mlfun = function( x ) length( x$fitted.values )
+  maxf = unlist( lapply( mlist, mlfun ) )
   for ( jj in 1:length(mlist)) {
     nm=names(mlist)[jj]
-    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+    names(mlist)[jj]=paste0(nm,"_",round(maxf[jj]/max(maxf)*100))
   }
 
 print( modelplot( mlist, 
@@ -1022,6 +1034,7 @@ ppmi500sel=ppmi500[ slit & !is.na(ppmi500$dtiqc), ]
 
 xcl=c('winz','threshold','original','rsfMR','cnxc')
 nuisnames = unique( c( 
+  getNamesFromDataframe( c("DTI","tsnr"), ppmi500sel, exclusions=xcl),
   getNamesFromDataframe( c("DTI","ssnr"), ppmi500sel, exclusions=xcl),
   getNamesFromDataframe( c("DTI","FD"), ppmi500sel, exclusions=xcl),
   getNamesFromDataframe( c("DTI","evr"), ppmi500sel, exclusions=xcl)))
@@ -1072,8 +1085,8 @@ for ( slfasym in  getNamesFromDataframe( c("DTI","orpus"), ppmi500 ) ) {
 
   mform = paste( "cnxvar ~ joinedDX+commonAge+commonSex+dti.ssnr_b0_mean_winz+
     dti.FD_mean_winz+dti.FD_max_winz+dti.ssnr_dwi_mean_winz+dti.fa_evr_winz")
-  mform = paste( "cnxvar ~ joinedDX+commonAge+commonSex+brainVolume+
-  dti.ssnr_b0_mean_winz+  dti.FD_mean_winz+dti.FD_max_winz+dti.fa_evr_winz")
+  mform = paste( "cnxvar ~ DXSubAsyn+commonAge+commonSex+brainVolume+
+  dti.ssnr_b0_mean_winz+ dti.tsnr_b0_mean_winz+ dti.FD_mean_winz+dti.FD_max_winz+dti.fa_evr_winz")
   # tempx=temp[temp$dti.FD_max_winz<=8,]
   tempx=temp[temp$dti.FD_mean_winz<=5,]
   tempx=scale_variables_in_equation( tempx, mform)
@@ -1087,13 +1100,14 @@ for ( slfasym in  getNamesFromDataframe( c("DTI","orpus"), ppmi500 ) ) {
   #grid.arrange( grobs=mygrobs2, nrow=2, 
   # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
   mlist = list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 )
+  maxf = unlist( lapply( mlist, mlfun ) )
   for ( jj in 1:length(mlist)) {
     nm=names(mlist)[jj]
-    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+    names(mlist)[jj]=paste0(nm,"_",round(maxf[jj]/max(maxf)*100))
   }
 
   print( modelplot( mlist, 
-    conf_level = .95, coef_omit = "nterc|snr|LRR|CNP|brainVolume")
+    conf_level = .95, coef_omit = "nterc|LRR|CNP|brainVolume|tsnr")
     + ggtitle( paste("DTI Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown)",shorten_pymm_names(slfasym)) )
     +    theme(
             plot.title = element_text(size = 20),
@@ -1196,10 +1210,14 @@ cat("\n\n\n\n\n\n")
 #grid.arrange( grobs=mygrobs2, nrow=2, 
 # top=paste('Connectivity vs nuisance and QC & DX: pass only R^2',insight::format_value(rsq(mdlD,adj=T),digits=3)))
 mlist=list( passAndFail=mdlF, passOnly=mdlP, AutoQC=mdlD, ManQC=mdlD2 )
+  maxf = unlist( lapply( mlist, mlfun ) )
 for ( jj in 1:length(mlist)) {
     nm=names(mlist)[jj]
-    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+    names(mlist)[jj]=paste0(nm,"_",round(maxf[jj]/max(maxf)*100))
   }
+
+
+
 print( modelplot( mlist, 
     conf_level = .95, coef_omit = "nterc|snr|LRR|CNP|brainVolume|sd|q0|max|min")
     + ggtitle( paste("NM models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown)") )
@@ -1234,20 +1252,21 @@ ppmi500sel=ppmi500[ slit & !is.na(ppmi500$qchuman_FLAIR), ]
 xcl=c('winz','threshold','original','rsfMR','cnxc')
 nuisnames = c("T2Flair_flair_evr","T2Flair_flair_SNR")
 
-mform=paste0( "T2Flair_flair_wmh_prior~joinedDX+brainVolume+commonAge+commonSex+",paste(nuisnames,collapse='+'))
+mform=paste0( "T2Flair_flair_wmh_prior~DXSubAsyn+brainVolume+commonAge+commonSex+",paste(nuisnames,collapse='+'))
 ppmi500sel=scale_variables_in_equation(ppmi500sel,mform)
 tempPass=ppmi500sel[ppmi500sel$qchuman_FLAIR==0,]
 tempFail=ppmi500sel[,]
 mdlMan=lm(mform,data=tempPass)
 mdlAuto=lm(mform,data=tempFail)
 mlist = list(  AutoQC=mdlAuto, ManQC=mdlMan )
-for ( jj in 1:length(mlist)) {
+  maxf = unlist( lapply( mlist, mlfun ) )
+  for ( jj in 1:length(mlist)) {
     nm=names(mlist)[jj]
-    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+    names(mlist)[jj]=paste0(nm,"_",round(maxf[jj]/max(maxf)*100))
   }
 print( modelplot( mlist, 
     conf_level = .95, coef_omit = "nterc|evr|LRR|brainV")
-    + ggtitle( paste("DTI Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown) WM hyperintensity") )
+    + ggtitle( paste("FLAIR Models: All vs Pass vs AutoQC+DX + ManQC+DX \n (select covars shown) WM hyperintensity") )
     +    theme(
             plot.title = element_text(size = 20),
             axis.title.x = element_text(size = 18),
@@ -1289,9 +1308,10 @@ for ( voi in vois ) {
     NoCuration=mdlAll, 
     AutoDetectFail=mdlAutoFail, 
     AutoQC=mdlAuto, ManQC=mdlMan )
+  maxf = unlist( lapply( mlist, mlfun ) )
   for ( jj in 1:length(mlist)) {
     nm=names(mlist)[jj]
-    names(mlist)[jj]=paste0(nm,"_",mlist[[jj]]$df.residual)
+    names(mlist)[jj]=paste0(nm,"_",round(maxf[jj]/max(maxf)*100))
   }
   print( modelplot( mlist, 
       conf_level = .95, coef_omit = "nterc|evr|LRR|spc|brainV|CNP")
@@ -1431,3 +1451,255 @@ for ( voi in vois ) {
 
 
 # 5. Empowers investigation of the "meaning" of M3RI at the population level 
+
+
+
+
+
+## simlr
+
+```{r simlr,echo=FALSE,eval=TRUE,fig.width=9,fig.height=3}
+######
+ppmi500$allpass=subtyper::fs(
+  ppmi500$qchuman_T1w==0 & ppmi500$qchuman_DTI ==0 & ppmi500$qchuman_rsfMRI==0)
+dosimlrMH = function( blaster,  energy='reg', nsimlr=5, myseed=3, connect_cog=TRUE, doAsym=TRUE, returnidps=FALSE, restrictDFN=FALSE, doperm=FALSE ) {
+  idps=antspymm_predictors(blaster,TRUE,TRUE)
+  idps=idps[ -multigrep(antspymm_nuisance_names()[-3],idps)]
+  if ( ! doAsym ) {
+    idps=idps[ -grep("Asym",idps)]
+    } else {
+    idps=idps[ -grep("Asymcit168",idps)]
+  }
+  idps=idps[ -grep("cleanup",idps)]
+  idps=idps[ -grep("snseg",idps)]
+  idps=idps[ -grep("_deep_",idps)]
+  idps=idps[ -grep("fcnxpro134",idps)]
+  idps=idps[ -grep("fcnxpro129",idps)]
+  idps=idps[ -grep("peraf",idps)]
+  idps=idps[ -grep("alff",idps)]
+  idps=idps[ -grep("LRAVGcit168",idps)]
+  idps=idps[ -grep("_l_",idps,fixed=TRUE)]
+  idps=idps[ -grep("_r_",idps,fixed=TRUE)]
+  rsfnames = idps[ grep("_2_",idps)]
+  if ( restrictDFN ) {
+    rsfnames = rsfnames[ grep("Default",rsfnames)]
+  } else {
+#    rsfnames = rsfnames[ multigrep( c("imbic","TempPar"),rsfnames)]
+  }
+  t1names = idps[ multigrep( c("T1Hier"),idps,intersect=TRUE)]
+  dtnames = unique( c( 
+    idps[ multigrep( c("mean_fa","DTI"),idps,intersect=TRUE)],
+    idps[ multigrep( c("mean_md","DTI"),idps,intersect=TRUE)] ))
+  idps=unique(c(t1names,dtnames,rsfnames))
+  if ( returnidps ) return(idps)
+  cogs=getNamesFromDataframe( 'updrs', blaster, exclusions=c('4','BL','delta'))
+  blaster2=blaster[  blaster$T1Hier_resnetGrade >= 1.02, ]
+#    blaster$allpass , ]
+  agedf=data.frame(stats::poly(blaster2$age_BL,2))
+  names(agedf)=c("age1","age2")
+  blaster2=cbind(blaster2,agedf)
+  #################################################
+  nperms=0
+  allnna = blaster2$haveall#  & blaster2$allpass# & subtyper::fs(blaster2$joinedDX == 'CN')
+  matsFull = list( 
+      t1=blaster2[,t1names], 
+      rs=blaster2[,rsfnames],
+      dt=blaster2[,dtnames],
+      cg=blaster2[,cogs])
+  mats = list( 
+      t1=antsrimpute(blaster2[allnna,t1names]),
+      rs=antsrimpute(blaster2[allnna,rsfnames]),
+      dt=antsrimpute(blaster2[allnna,dtnames]),
+      cg=antsrimpute(blaster2[allnna,cogs]))
+  if ( doperm ) {
+    nada=setSeedBasedOnTime()
+#    print( paste("perm",nada))
+    sss=sample( 1:nrow( matsFull[[1]]  ))
+    for ( jj in 1:length( mats ) ) {
+        ss=sample( 1:nrow( mats[[jj]]  ))
+#        print(head(ss))
+        mats[[jj]]=mats[[jj]][sample( 1:nrow( mats[[jj]]  )),]
+#        matsFull[[jj]]=matsFull[[jj]][sss,]
+    }
+  }
+  if ( ! connect_cog ) {
+    mats=mats[1:(length(mats)-1)]
+    matsFull=matsFull[1:(length(matsFull)-1)]
+  }
+  nms = names(mats)
+  regs0 = list()
+  for ( x in 1:length(mats)) {
+#      mats[[x]]=residuals( lm( data.matrix(mats[[x]]) ~ 1, data=blaster2[allnna,]))
+      mats[[x]]=data.matrix(mats[[x]])
+      mycor = cor( mats[[x]] )
+      mycor[mycor < 0.8]=0
+      regs0[[x]]=data.matrix(mycor)
+      }
+  names(regs0)=names(mats)
+  regs = regularizeSimlr( mats, fraction=0.05, sigma=rep(2.0,length(mats)) )
+  names(regs0)=names(mats)
+  names(regs)=names(mats)
+  if ( connect_cog ) 
+    regs[["cg"]] = Matrix(regs0[["cg"]], sparse = TRUE) 
+  if ( !doperm )
+    for ( pp in 1:length(regs)) plot(image(regs[[pp]]))
+  for ( k in 1:length(mats)) {
+    if ( ncol(mats[[k]]) != ncol(regs[[k]]) ) {
+      regs[[k]]=Matrix(regs0[[k]], sparse = TRUE) 
+      msg=paste("regularization cols not equal",k,ncol(mats[[k]]),ncol(regs[[k]]),names(mats)[k])
+      message(msg)
+      # stop( )
+      }
+    }
+  ########### zzz ############
+  myjr = T
+  prescaling = c( 'robust', 'np' )
+  optimus = 'lineSearch'
+  maxits = 100
+  ebber = 0.99
+  pizzer = rep( "positive", length(mats) )
+  # if ( connect_cog )  pizzer[length(pizzer)]='either'
+  objectiver='cca';mixer = 'pca'
+  if ( energy == 'reg') {
+    objectiver='regression';mixer = 'ica'
+  }
+  if ( energy == 'lrr') {
+    objectiver='lowRankRegression';mixer = 'pca'
+  }
+  sparval = rep( 0.8, length( mats ))
+  library(FactoMineR)
+  library(factoextra)
+  if ( connect_cog ){
+    res.pca <- PCA(cbind(mats[[1]],mats[[2]],mats[[3]],mats[[4]]),  graph = FALSE)
+  } else res.pca <- PCA(cbind(mats[[1]],mats[[2]],mats[[3]]),  graph = FALSE)
+  fviz_screeplot(res.pca, addlabels = TRUE, ylim = c(0, 14), ncp=20 ) # beyond 20 <1%
+  if ( nsimlr < 1 ) {
+    ctit=0
+    for ( jj in 1:length(mats) ) {
+      ctit=ctit+ncol(mats[[jj]])
+      sparval[jj] = 1.0 - 20/ncol(mats[[jj]])
+    }
+    nsimlr = round( ctit * nsimlr )
+    message(paste("nsimlr",nsimlr))
+    print(paste("nsimlr",nsimlr))
+    print(sparval)
+  }
+  initu = initializeSimlr(
+      mats,
+      nsimlr,
+      jointReduction = myjr,
+      zeroUpper = FALSE,
+      uAlgorithm = "pca",
+      addNoise = 0 )
+  if ( connect_cog ) {
+    clist = list()
+    inflammNums=which(names(mats)=='cg')
+    for ( j in 1:length( mats ) ) clist[[j]] = inflammNums
+    for ( j in inflammNums )
+      clist[[j]] = (1:length(mats))[ -inflammNums ]
+    } else clist=NULL
+  simlrX = simlr( mats, regs, iterations=maxits, 
+    verbose= !doperm,
+    randomSeed = myseed,
+    mixAlg=mixer,
+    energyType=objectiver,
+    scale = prescaling,
+    sparsenessQuantiles=sparval,
+    expBeta = ebber,
+    positivities = pizzer, 
+    connectors=clist,
+    optimizationStyle=optimus,
+    initialUMatrix=initu )
+
+  for ( kk in 1:length(mats) ) {
+#    temp = simlrX$v[[kk]]
+#    for ( n in 1:ncol(temp)) temp[,n]=abs(temp[,n])/max(abs(temp[,n]))
+#    simlrX$v[[kk]]=eliminateNonUniqueColumns(temp)
+  }
+
+  #################
+  nsimx=nsimlr
+  nms = names( simlrX$v ) = names(mats)
+  simmat = data.matrix(matsFull[[1]] )%*% abs( simlrX$v[[1]] )
+  colnames( simmat ) = paste0(nms[1],colnames( simmat ))
+  for ( j in 2:length(mats)) {
+      if (names(mats)[j]=='cg' & pizzer[j] != 'positive' ) {
+        temp = data.matrix(matsFull[[j]] ) %*% ( simlrX$v[[j]])
+      } else temp = data.matrix(matsFull[[j]] ) %*% abs( simlrX$v[[j]] )
+      colnames( temp ) = paste0(nms[j],colnames( temp ))
+      simmat = cbind( simmat, temp )
+  }
+  blaster2sim = cbind( blaster2, simmat )
+  nsim = ncol( simlrX$v[[1]] )
+  simnames = colnames(simmat)
+  kk=1
+  nmats=1:length(matsFull)
+  matsB=mats
+  for ( kk in 1:length(mats)) matsB[[kk]]=data.matrix(matsB[[kk]])
+  kk=length(mats)
+  temp = predictSimlr( matsB, simlrX, targetMatrix=kk, 
+        sourceMatrices=nmats[nmats!=kk] )
+
+  return( list( demog=blaster2sim, mats=matsFull, simnames=simnames, simlrX=simlrX, energy=energy, temp=temp ) )
+  ################
+  }
+######################################################################
+cogs=getNamesFromDataframe( 'updrs', ppmi500, exclusions=c('4','BL','delta'))
+nsm=length(cogs)
+nsm=2
+permdf=data.frame()
+for ( permxpt in 0:20 ) {
+  if ( permxpt == 0 ) {
+    doperm=FALSE
+    permstate='original'
+  } else {
+    doperm=TRUE
+    permstate=paste('perm',permxpt)
+  }
+  meeko = dosimlrMH( ppmi500, nsimlr=nsm, energy='cca', connect_cog=T, doAsym=T, 
+    restrictDFN=F, doperm=doperm )
+  for ( kk in 1:length( (meeko$temp$varxfull )) ) print( max(meeko$temp$varxfull[[kk]]) )
+  ######################################################################
+  grepper=grep("cg",meeko$simnames)
+  if ( length(grepper) > 0 ) {
+    simsub=meeko$simnames[ -grepper ]
+  } else {
+    simsub=meeko$simnames
+  }
+  # simsub=simsub[ grep("PC1",simsub)]
+  dxv='DXSubAsyn'
+  dxv='joinedDX'
+  for ( nums in 1:1 ) {
+    simsub=c(
+      paste0("t1PC",nums),
+      paste0("rsPC",nums),
+      paste0("dtPC",nums) )
+    bform=paste("updrs_totscore ~ age_BL + hy_BL+ commonSex+DXSubAsyn")
+    bform=paste(cogs[5]," ~ age_BL + commonSex + hy_BL + ",dxv)
+    mform1=paste(bform,"+(",paste(simsub,collapse='+'),")")
+  # mform2=paste(bform,"*(",paste(simsub,collapse='+'),")")
+    temp=meeko$demog[ meeko$demog$allpass, ]  # [ meeko$demog$joinedDX=='PDSporadic', ]
+    temp[,simsub[2]]=psych::winsor( temp[,simsub[2]], 0.01)
+    mdl2=lm( mform2 , data=temp )
+    mdl1=lm( mform1 , data=temp )
+    # mdl=lm( mform , data=meeko$demog )
+    bmdl=lm( bform , data=temp[names(predict(mdl2)),] )
+    myanv0=anova(bmdl,mdl1)
+#    myanv1=anova(bmdl,mdl2)
+#    myanv2=anova(mdl1,mdl2)
+    summary(mdl2)
+    print( paste( nums, myanv0$Pr[2] ) )
+    myco=coefficients(summary(mdl1))
+    visreg::visreg( mdl1, simsub[1] , main=paste('T1', permstate,insight::format_p(myco['t1PC1','Pr(>|t|)'])) )
+    visreg::visreg( mdl1, simsub[2] , main=paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])) )
+    visreg::visreg( mdl1, simsub[3], main=paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])) )
+    nn=nrow(permdf)+1
+    permdf[nn,'permstate']=permstate
+    permdf[nn,'anv']=myanv0$Pr[2]
+    permdf[nn,'pvalt1']=myco['t1PC1','Pr(>|t|)']
+    permdf[nn,'pvalrs']=myco['rsPC1','Pr(>|t|)']
+    permdf[nn,'pvaldt']=myco['dtPC1','Pr(>|t|)']
+    }
+}
+#################
+```
