@@ -1648,7 +1648,7 @@ cogs=getNamesFromDataframe( 'updrs', ppmi500, exclusions=c('4','BL','delta'))
 nsm=length(cogs)
 nsm=2
 permdf=data.frame()
-maxperm=10
+maxperm=200
 for ( permxpt in 0:maxperm ) {
   if ( permxpt == 0 ) {
     doperm=FALSE
@@ -1680,7 +1680,8 @@ for ( permxpt in 0:maxperm ) {
     mform1=paste(bform,"+(",paste(simsub,collapse='+'),")")
   # mform2=paste(bform,"*(",paste(simsub,collapse='+'),")")
     temp=meeko$demog[ meeko$demog$allpass, ]  # [ meeko$demog$joinedDX=='PDSporadic', ]
-    temp[,simsub[2]]=psych::winsor( temp[,simsub[2]], 0.01)
+    for ( zz in 1:length(simsub))
+      temp[,simsub[zz]]=psych::winsor( temp[,simsub[zz]], 0.01)
     mdl2=lm( mform2 , data=temp )
     mdl1=lm( mform1 , data=temp )
     # mdl=lm( mform , data=meeko$demog )
@@ -1694,7 +1695,8 @@ for ( permxpt in 0:maxperm ) {
     gg1=visreg::visreg( mdl1, simsub[1], gg=TRUE ) + theme_minimal() + ggtitle(paste('T1', permstate,insight::format_p(myco['t1PC1','Pr(>|t|)'])))
     gg2=visreg::visreg( mdl1, simsub[2] , main=paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])), gg=TRUE  ) + theme_minimal() + ggtitle(paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])))
     gg3=visreg::visreg( mdl1, simsub[3], main=paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])), gg=TRUE  ) + theme_minimal() + ggtitle(paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])))
-    grid.arrange(grobs=list(gg1,gg2,gg3),nrow=1)
+    if ( myanv0$Pr[2] < 0.001 )
+      grid.arrange(grobs=list(gg1,gg2,gg3),nrow=1)
     nn=nrow(permdf)+1
     permdf[nn,'permstate']=permstate
     permdf[nn,'anv']=myanv0$Pr[2]
