@@ -1709,10 +1709,53 @@ for ( permxpt in 0:maxperm ) {
 ```
 
 
+```{r,echo=FALSE,eval=TRUE,message=FALSE,include=FALSE,cache=TRUE}
+meeko = dosimlrMH( ppmi500, nsimlr=nsm, energy='cca', connect_cog=T, doAsym=T, 
+    restrictDFN=F, doperm=FALSE )
 
+bform=paste(cogs[5]," ~ age_BL + commonSex + hy_BL + ",dxv)
+bform=paste(cogs[5]," ~ age_BL + commonSex + hy_BL ")
+mform1=paste(bform,"+(",paste(simsub,collapse='+'),")")
+temp=meeko$demog[ meeko$demog$allpass & meeko$demog$joinedDX=='PDSporadic', ]
+temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='PDSporadicPositive', ]
+for ( zz in 1:length(simsub))
+  temp[,simsub[zz]]=psych::winsor( temp[,simsub[zz]], 0.01)
+mdl1=lm( mform1 , data=temp )
+summary(mdl1)
+
+temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='ProdromalSporadicPositive', ]
+for ( zz in 1:length(simsub))
+  temp[,simsub[zz]]=psych::winsor( temp[,simsub[zz]], 0.01)
+mdl1=lm( mform1 , data=temp )
+summary(mdl1)
+
+temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='PDSporadicNegative', ]
+for ( zz in 1:length(simsub))
+  temp[,simsub[zz]]=psych::winsor( temp[,simsub[zz]], 0.01)
+mdl1=lm( mform1 , data=temp )
+summary(mdl1)
+```
+
+```{r interpsimg,echo=FALSE,eval=TRUE,message=FALSE,include=TRUE,cache=FALSE,fig.width=8,fig.height=8}
+# myinterp=0
+n2show=10
+t1int=interpret_simlr_vector( meeko$simlrX, meeko$mats, 't1PC1', n2show=n2show )
+rsint=interpret_simlr_vector( meeko$simlrX, meeko$mats, 'rsPC1', n2show=n2show  )
+dtint=interpret_simlr_vector( meeko$simlrX, meeko$mats, 'dtPC1', n2show=n2show  )
+myggdf = data.frame( 
+  idp=names(c(t1int,rsint,dtint)),
+  modality=c(rep("t1",n2show),rep("rs",n2show),rep('dt',n2show)),
+  value=as.numeric(c(t1int,rsint,dtint)))
+myggdf$modality=factor(myggdf$modality)
+myggdf$idp=factor(myggdf$idp)
+myggdf$value=as.numeric(myggdf$value)
+ggbarplot( myggdf, 'idp', 'value', fill='modality',  orientation = "horiz", sort.val ='asc' )
+# ggbarplot( myggdf, 'value', 'idp', fill='modality', order='d',  orientation = "horiz")
+```
 
 
 ```{r,results='asis',echo=FALSE}
+
 # temp=ztable(mytable(NM.QC.cat~.,data=plot_data),zebra=2)
 # Print the ztable object, ensuring it's treated as LaTeX code
 # print(temp, type = "html",size=5,caption='NM QC',sidewaystable=TRUE)
@@ -1722,8 +1765,9 @@ permdf %>%
       kableExtra::kable_styling(latex_options = c("striped", "scale_down"))
 ```
 
-```{r,echo=FALSE}
-permdf$logp = log( permdf$anv )
+```{r,echo=FALSE,fig.width=8,fig.height=4}
+permdf$logp = -1.0 * log10( permdf$anv )
 gghistogram( permdf, x = 'logp',
-      add = "mean", add_density = TRUE, title='SiMLR original data projection vs permuted projections: model significance', fill='permstate', legend='none')
+      add = "mean", add_density = FALSE, title='SiMLR original data projection vs permuted projections: model significance', fill='permstate', legend='top', 
+      xlab='-log_10(p) updrs total score from t1, rsfmri + dti')
 ```
