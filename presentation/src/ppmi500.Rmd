@@ -1709,12 +1709,13 @@ for ( permxpt in 0:maxperm ) {
 ```
 
 
-```{r,echo=FALSE,eval=TRUE,message=FALSE,include=FALSE,cache=TRUE}
+```{r,echo=FALSE,eval=TRUE,message=FALSE,include=FALSE,cache=TRUE,fig.width=5,fig.height=5}
 meeko = dosimlrMH( ppmi500, nsimlr=nsm, energy='cca', connect_cog=T, doAsym=T, 
     restrictDFN=F, doperm=FALSE )
 
 bform=paste(cogs[5]," ~ age_BL + commonSex + hy_BL + ",dxv)
-bform=paste(cogs[5]," ~ age_BL + commonSex + hy_BL ")
+bform=paste(cogs[5]," ~ age_BL + commonSex + hy_BL + LEDD +")
+bform=paste(cogs[5]," ~ age_BL + commonSex +  hy_BL ")
 mform1=paste(bform,"+(",paste(simsub,collapse='+'),")")
 temp=meeko$demog[ meeko$demog$allpass & meeko$demog$joinedDX=='PDSporadic', ]
 temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='PDSporadicPositive', ]
@@ -1723,11 +1724,17 @@ for ( zz in 1:length(simsub))
 mdl1=lm( mform1 , data=temp )
 summary(mdl1)
 
-temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='ProdromalSporadicPositive', ]
+temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='PDSporadicPositive', ]
 for ( zz in 1:length(simsub))
   temp[,simsub[zz]]=psych::winsor( temp[,simsub[zz]], 0.01)
 mdl1=lm( mform1 , data=temp )
 summary(mdl1)
+
+myco=coefficients(summary(mdl1))
+gg0=visreg::visreg( mdl1, 'hy_BL', gg=TRUE ) + theme_minimal() + ggtitle(paste('HY',insight::format_p(myco['hy_BL','Pr(>|t|)'])))
+gg1=visreg::visreg( mdl1, simsub[1], gg=TRUE ) + theme_minimal() + ggtitle(paste('T1',insight::format_p(myco['t1PC1','Pr(>|t|)'])))
+gg2=visreg::visreg( mdl1, simsub[2] , main=paste('rsfMRI', permstate,insight::format_p(myco['rsPC1','Pr(>|t|)'])), gg=TRUE  ) + theme_minimal() + ggtitle(paste('rsfMRI',insight::format_p(myco['rsPC1','Pr(>|t|)'])))
+gg3=visreg::visreg( mdl1, simsub[3], main=paste('DTI', permstate,insight::format_p(myco['dtPC1','Pr(>|t|)'])), gg=TRUE  ) + theme_minimal() + ggtitle(paste('DTI',insight::format_p(myco['dtPC1','Pr(>|t|)'])))
 
 temp=meeko$demog[ meeko$demog$allpass & meeko$demog$DXSubAsyn=='PDSporadicNegative', ]
 for ( zz in 1:length(simsub))
@@ -1736,9 +1743,16 @@ mdl1=lm( mform1 , data=temp )
 summary(mdl1)
 ```
 
-```{r interpsimg,echo=FALSE,eval=TRUE,message=FALSE,include=TRUE,cache=FALSE,fig.width=8,fig.height=8}
+
+```{r pupdrs,echo=FALSE,eval=TRUE,message=FALSE,include=TRUE,cache=FALSE,fig.width=5,fig.height=5}
+grid.arrange(grobs=list(gg0,gg1,gg2,gg3),nrow=2,
+  top=paste("SpPD+ UPDRS Tot from M3RI: R^2",insight::format_value(rsq(mdl1))))
+```
+
+```{r interpsimg,echo=FALSE,eval=TRUE,message=FALSE,include=TRUE,cache=FALSE,fig.width=7,fig.height=7}
+
 # myinterp=0
-n2show=10
+n2show=6
 t1int=interpret_simlr_vector( meeko$simlrX, meeko$mats, 't1PC1', n2show=n2show )
 rsint=interpret_simlr_vector( meeko$simlrX, meeko$mats, 'rsPC1', n2show=n2show  )
 dtint=interpret_simlr_vector( meeko$simlrX, meeko$mats, 'dtPC1', n2show=n2show  )
@@ -1749,7 +1763,7 @@ myggdf = data.frame(
 myggdf$modality=factor(myggdf$modality)
 myggdf$idp=factor(myggdf$idp)
 myggdf$value=as.numeric(myggdf$value)
-ggbarplot( myggdf, 'idp', 'value', fill='modality',  orientation = "horiz", sort.val ='asc' )
+ggbarplot( myggdf, 'idp', 'value', fill='modality',  orientation = "horiz", sort.val ='asc', palette='jco' )
 # ggbarplot( myggdf, 'value', 'idp', fill='modality', order='d',  orientation = "horiz")
 ```
 
@@ -1769,5 +1783,5 @@ permdf %>%
 permdf$logp = -1.0 * log10( permdf$anv )
 gghistogram( permdf, x = 'logp',
       add = "mean", add_density = FALSE, title='SiMLR original data projection vs permuted projections: model significance', fill='permstate', legend='top', 
-      xlab='-log_10(p) updrs total score from t1, rsfmri + dti')
+      xlab='-log_10(p) updrs total score from t1, rsfmri + dti', palette='jco')
 ```
